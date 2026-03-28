@@ -1,0 +1,34 @@
+[
+  {
+    "id": "usr-001",
+    "username": "admin",
+    "password": "admin123",
+    "displayName": "Portal Admin",
+    "email": "admin@contoso.internal",
+    "groups": ["entra-portal-admin", "entra-devops-read", "entra-devops-approver", "entra-mlops-read", "entra-config-admin"]
+  },
+  {
+    "id": "usr-002",
+    "username": "devops",
+    "password": "devops123",
+    "displayName": "DevOps Engineer",
+    "email": "devops.engineer@contoso.internal",
+    "groups": ["entra-devops-read", "entra-devops-approver"]
+  },
+  {
+    "id": "usr-003",
+    "username": "mlops",
+    "password": "mlops123",
+    "displayName": "MLOps Engineer",
+    "email": "mlops.engineer@contoso.internal",
+    "groups": ["entra-mlops-read"]
+  },
+  {
+    "id": "usr-004",
+    "username": "readonly",
+    "password": "readonly123",
+    "displayName": "Read Only User",
+    "email": "readonly@contoso.internal",
+    "groups": ["entra-devops-read", "entra-mlops-read"]
+  }
+]

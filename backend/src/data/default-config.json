@@ -1,0 +1,60 @@
+{
+  "azureDevOpsOrgs": [
+    {
+      "id": "org-001",
+      "name": "contoso",
+      "url": "https://dev.azure.com/contoso",
+      "enabled": true
+    }
+  ],
+  "monitoredProjects": [
+    { "id": "proj-001", "orgId": "org-001", "name": "Platform Infrastructure", "projectKey": "platform-infra", "enabled": true },
+    { "id": "proj-002", "orgId": "org-001", "name": "MLOps Platform", "projectKey": "mlops-platform", "enabled": true },
+    { "id": "proj-003", "orgId": "org-001", "name": "Microservices", "projectKey": "microservices", "enabled": true },
+    { "id": "proj-004", "orgId": "org-001", "name": "Backend Services", "projectKey": "backend-services", "enabled": true },
+    { "id": "proj-005", "orgId": "org-001", "name": "Customer Portal", "projectKey": "customer-portal", "enabled": true },
+    { "id": "proj-006", "orgId": "org-001", "name": "Data Platform", "projectKey": "data-platform", "enabled": true },
+    { "id": "proj-007", "orgId": "org-001", "name": "Security", "projectKey": "security", "enabled": true }
+  ],
+  "monitoredPools": [
+    { "id": "mpool-001", "orgId": "org-001", "poolId": "pool-001", "poolName": "Azure Pipelines - Linux Production", "enabled": true },
+    { "id": "mpool-002", "orgId": "org-001", "poolId": "pool-002", "poolName": "Azure Pipelines - Windows Build", "enabled": true },
+    { "id": "mpool-003", "orgId": "org-001", "poolId": "pool-003", "poolName": "Self-Hosted - ML Training", "enabled": true },
+    { "id": "mpool-004", "orgId": "org-001", "poolId": "pool-004", "poolName": "Azure Pipelines - Container Build", "enabled": true },
+    { "id": "mpool-005", "orgId": "org-001", "poolId": "pool-005", "poolName": "Self-Hosted - Security Scan", "enabled": true }
+  ],
+  "gcpProjects": [
+    { "id": "gcp-001", "projectId": "contoso-ml-prod", "displayName": "ML Production", "regions": ["us-central1", "europe-west4"], "enabled": true },
+    { "id": "gcp-002", "projectId": "contoso-ml-research", "displayName": "ML Research", "regions": ["us-central1", "us-east1"], "enabled": true }
+  ],
+  "alertThresholds": {
+    "poolCriticalPercent": 50,
+    "poolWarningPercent": 70,
+    "agentOfflineMinutes": 30,
+    "queueWaitMinutes": 60,
+    "approvalAgeHours": 24
+  },
+  "refreshIntervals": {
+    "poolsMs": 60000,
+    "agentsMs": 60000,
+    "queueMs": 30000,
+    "approvalsMs": 30000,
+    "vertexJobsMs": 60000,
+    "alertsMs": 30000
+  },
+  "featureFlags": {
+    "enableApprovalActions": false,
+    "enableAlertNotifications": false,
+    "enableConfigEdit": true,
+    "enableVertexLogs": false,
+    "enableDarkMode": true
+  },
+  "displayConfig": {
+    "defaultTheme": "light",
+    "dateFormat": "YYYY-MM-DD HH:mm",
+    "timeZone": "UTC",
+    "pageSize": 25
+  },
+  "updatedAt": "2026-03-28T00:00:00Z",
+  "updatedBy": "system"
+}

@@ -1,0 +1,160 @@
+[
+  {
+    "id": "vtx-job-001",
+    "displayName": "fraud-detection-training-v2.4",
+    "pipelineName": "fraud-detection-pipeline",
+    "projectId": "contoso-ml-prod",
+    "region": "us-central1",
+    "state": "PIPELINE_STATE_RUNNING",
+    "createTime": "2026-03-28T09:00:00Z",
+    "startTime": "2026-03-28T09:02:00Z",
+    "updateTime": "2026-03-28T10:40:00Z",
+    "labels": { "team": "risk", "env": "prod", "model-type": "classification" },
+    "triggerSource": "scheduled",
+    "parameters": { "learning_rate": 0.001, "batch_size": 256, "epochs": 50, "dataset_version": "v2.4" },
+    "stateHistory": [
+      { "state": "PIPELINE_STATE_PENDING", "timestamp": "2026-03-28T09:00:00Z" },
+      { "state": "PIPELINE_STATE_RUNNING", "timestamp": "2026-03-28T09:02:00Z" }
+    ]
+  },
+  {
+    "id": "vtx-job-002",
+    "displayName": "recommendation-engine-v1.8",
+    "pipelineName": "recommendation-pipeline",
+    "projectId": "contoso-ml-prod",
+    "region": "us-central1",
+    "state": "PIPELINE_STATE_SUCCEEDED",
+    "createTime": "2026-03-28T06:00:00Z",
+    "startTime": "2026-03-28T06:01:30Z",
+    "endTime": "2026-03-28T09:15:00Z",
+    "updateTime": "2026-03-28T09:15:00Z",
+    "durationSeconds": 11610,
+    "labels": { "team": "personalization", "env": "prod", "model-type": "collaborative-filtering" },
+    "triggerSource": "manual",
+    "parameters": { "embedding_dim": 128, "num_layers": 4, "training_steps": 10000 },
+    "stateHistory": [
+      { "state": "PIPELINE_STATE_PENDING", "timestamp": "2026-03-28T06:00:00Z" },
+      { "state": "PIPELINE_STATE_RUNNING", "timestamp": "2026-03-28T06:01:30Z" },
+      { "state": "PIPELINE_STATE_SUCCEEDED", "timestamp": "2026-03-28T09:15:00Z" }
+    ],
+    "modelResourceName": "projects/contoso-ml-prod/locations/us-central1/models/rec-engine-v1-8"
+  },
+  {
+    "id": "vtx-job-003",
+    "displayName": "churn-prediction-nightly",
+    "pipelineName": "churn-prediction-pipeline",
+    "projectId": "contoso-ml-prod",
+    "region": "europe-west4",
+    "state": "PIPELINE_STATE_FAILED",
+    "createTime": "2026-03-28T02:00:00Z",
+    "startTime": "2026-03-28T02:01:00Z",
+    "endTime": "2026-03-28T02:45:00Z",
+    "updateTime": "2026-03-28T02:45:00Z",
+    "durationSeconds": 2640,
+    "labels": { "team": "retention", "env": "prod", "schedule": "nightly" },
+    "triggerSource": "scheduled",
+    "error": { "code": 3, "message": "Training job failed: OOM error on node worker-2. Requested 64GB, available 48GB." },
+    "parameters": { "n_estimators": 500, "max_depth": 8, "feature_set": "v3" },
+    "stateHistory": [
+      { "state": "PIPELINE_STATE_PENDING", "timestamp": "2026-03-28T02:00:00Z" },
+      { "state": "PIPELINE_STATE_RUNNING", "timestamp": "2026-03-28T02:01:00Z" },
+      { "state": "PIPELINE_STATE_FAILED", "timestamp": "2026-03-28T02:45:00Z", "message": "OOM error on worker-2" }
+    ]
+  },
+  {
+    "id": "vtx-job-004",
+    "displayName": "nlp-sentiment-finetune-v3.1",
+    "pipelineName": "nlp-finetuning-pipeline",
+    "projectId": "contoso-ml-research",
+    "region": "us-central1",
+    "state": "PIPELINE_STATE_RUNNING",
+    "createTime": "2026-03-28T08:30:00Z",
+    "startTime": "2026-03-28T08:32:00Z",
+    "updateTime": "2026-03-28T10:41:00Z",
+    "labels": { "team": "nlp", "env": "research", "base-model": "bert-large" },
+    "triggerSource": "manual",
+    "parameters": { "base_model": "bert-large-uncased", "num_train_epochs": 5, "per_device_batch_size": 32 },
+    "stateHistory": [
+      { "state": "PIPELINE_STATE_PENDING", "timestamp": "2026-03-28T08:30:00Z" },
+      { "state": "PIPELINE_STATE_RUNNING", "timestamp": "2026-03-28T08:32:00Z" }
+    ]
+  },
+  {
+    "id": "vtx-job-005",
+    "displayName": "demand-forecasting-weekly",
+    "pipelineName": "demand-forecasting-pipeline",
+    "projectId": "contoso-ml-prod",
+    "region": "us-central1",
+    "state": "PIPELINE_STATE_SUCCEEDED",
+    "createTime": "2026-03-28T04:00:00Z",
+    "startTime": "2026-03-28T04:01:00Z",
+    "endTime": "2026-03-28T05:30:00Z",
+    "updateTime": "2026-03-28T05:30:00Z",
+    "durationSeconds": 5340,
+    "labels": { "team": "supply-chain", "env": "prod", "schedule": "weekly" },
+    "triggerSource": "scheduled",
+    "parameters": { "forecast_horizon": 14, "model_type": "prophet", "seasonality": "auto" },
+    "stateHistory": [
+      { "state": "PIPELINE_STATE_PENDING", "timestamp": "2026-03-28T04:00:00Z" },
+      { "state": "PIPELINE_STATE_RUNNING", "timestamp": "2026-03-28T04:01:00Z" },
+      { "state": "PIPELINE_STATE_SUCCEEDED", "timestamp": "2026-03-28T05:30:00Z" }
+    ],
+    "modelResourceName": "projects/contoso-ml-prod/locations/us-central1/models/demand-forecast-weekly"
+  },
+  {
+    "id": "vtx-job-006",
+    "displayName": "image-classification-retrain",
+    "pipelineName": "image-classification-pipeline",
+    "projectId": "contoso-ml-research",
+    "region": "us-east1",
+    "state": "PIPELINE_STATE_FAILED",
+    "createTime": "2026-03-28T07:00:00Z",
+    "startTime": "2026-03-28T07:01:00Z",
+    "endTime": "2026-03-28T07:12:00Z",
+    "updateTime": "2026-03-28T07:12:00Z",
+    "durationSeconds": 660,
+    "labels": { "team": "vision", "env": "research" },
+    "triggerSource": "manual",
+    "error": { "code": 13, "message": "Internal error: failed to provision GPU accelerator. Quota exceeded for resource NVIDIA_T4 in region us-east1." },
+    "parameters": { "model_architecture": "efficientnet-b4", "image_size": 380 },
+    "stateHistory": [
+      { "state": "PIPELINE_STATE_PENDING", "timestamp": "2026-03-28T07:00:00Z" },
+      { "state": "PIPELINE_STATE_RUNNING", "timestamp": "2026-03-28T07:01:00Z" },
+      { "state": "PIPELINE_STATE_FAILED", "timestamp": "2026-03-28T07:12:00Z", "message": "GPU quota exceeded" }
+    ]
+  },
+  {
+    "id": "vtx-job-007",
+    "displayName": "anomaly-detection-batch-v2",
+    "pipelineName": "anomaly-detection-pipeline",
+    "projectId": "contoso-ml-prod",
+    "region": "europe-west4",
+    "state": "PIPELINE_STATE_RUNNING",
+    "createTime": "2026-03-28T10:00:00Z",
+    "startTime": "2026-03-28T10:02:00Z",
+    "updateTime": "2026-03-28T10:42:00Z",
+    "labels": { "team": "platform", "env": "prod", "data-source": "telemetry" },
+    "triggerSource": "scheduled",
+    "parameters": { "window_size": "6h", "threshold": 0.95, "alert_on_anomaly": true },
+    "stateHistory": [
+      { "state": "PIPELINE_STATE_PENDING", "timestamp": "2026-03-28T10:00:00Z" },
+      { "state": "PIPELINE_STATE_RUNNING", "timestamp": "2026-03-28T10:02:00Z" }
+    ]
+  },
+  {
+    "id": "vtx-job-008",
+    "displayName": "pricing-model-optimization",
+    "pipelineName": "pricing-optimization-pipeline",
+    "projectId": "contoso-ml-prod",
+    "region": "us-central1",
+    "state": "PIPELINE_STATE_QUEUED",
+    "createTime": "2026-03-28T10:35:00Z",
+    "updateTime": "2026-03-28T10:35:00Z",
+    "labels": { "team": "pricing", "env": "prod" },
+    "triggerSource": "scheduled",
+    "parameters": { "optimization_target": "margin", "constraints": "regulatory" },
+    "stateHistory": [
+      { "state": "PIPELINE_STATE_QUEUED", "timestamp": "2026-03-28T10:35:00Z" }
+    ]
+  }
+]

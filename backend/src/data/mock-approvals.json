@@ -1,0 +1,67 @@
+[
+  {
+    "id": "appr-001",
+    "project": "platform-infra",
+    "organization": "contoso",
+    "pipelineName": "platform-infra-deploy",
+    "stageName": "Deploy to Production",
+    "environmentName": "production",
+    "approvers": ["ops-lead@contoso.internal", "james.chen@contoso.internal"],
+    "waitingSince": "2026-03-28T08:00:00Z",
+    "ageMinutes": 165,
+    "status": "pending",
+    "runId": "run-49818"
+  },
+  {
+    "id": "appr-002",
+    "project": "backend-services",
+    "organization": "contoso",
+    "pipelineName": "dotnet-api-release",
+    "stageName": "Production Deployment",
+    "environmentName": "production",
+    "approvers": ["backend-lead@contoso.internal"],
+    "waitingSince": "2026-03-28T10:15:00Z",
+    "ageMinutes": 30,
+    "status": "pending",
+    "runId": "run-49823"
+  },
+  {
+    "id": "appr-003",
+    "project": "platform-infra",
+    "organization": "contoso",
+    "pipelineName": "platform-infra-deploy",
+    "stageName": "Smoke Tests Gate",
+    "environmentName": "staging",
+    "approvers": ["qa-team@contoso.internal", "platform-lead@contoso.internal"],
+    "waitingSince": "2026-03-28T10:30:00Z",
+    "ageMinutes": 15,
+    "status": "pending",
+    "runId": "run-49828"
+  },
+  {
+    "id": "appr-004",
+    "project": "customer-portal",
+    "organization": "contoso",
+    "pipelineName": "customer-portal-release",
+    "stageName": "UAT Gate",
+    "environmentName": "uat",
+    "approvers": ["product-owner@contoso.internal", "qa-lead@contoso.internal"],
+    "waitingSince": "2026-03-27T16:30:00Z",
+    "ageMinutes": 1065,
+    "status": "pending",
+    "runId": "run-49801"
+  },
+  {
+    "id": "appr-005",
+    "project": "data-platform",
+    "organization": "contoso",
+    "pipelineName": "data-migration-v3",
+    "stageName": "Database Migration Approval",
+    "environmentName": "production",
+    "approvers": ["dba-team@contoso.internal", "data-lead@contoso.internal"],
+    "waitingSince": "2026-03-28T06:00:00Z",
+    "ageMinutes": 285,
+    "status": "pending",
+    "runId": "run-49815"
+  }
+]
