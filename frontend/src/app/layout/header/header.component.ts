@@ -1,16 +1,18 @@
 import { Component, inject, signal } from '@angular/core';
 import { CommonModule } from '@angular/common';
+import { FormsModule } from '@angular/forms';
 import { Router, NavigationEnd, RouterModule } from '@angular/router';
 import { filter } from 'rxjs/operators';
+import { injectQueryClient } from '@tanstack/angular-query-experimental';
 import { AuthService } from '../../core/auth/auth.service';
 import { ThemeService } from '../../core/theme/theme.service';
 import { ApiClientService } from '../../core/http/api-client.service';
-import { RefreshStatus } from '../../models/common.model';
+import { RefreshIntervalService } from '../../core/refresh/refresh-interval.service';
 
 @Component({
   selector: 'app-header',
   standalone: true,
-  imports: [CommonModule, RouterModule],
+  imports: [CommonModule, RouterModule, FormsModule],
   template: `
     <header class="topbar">
       <div class="topbar-left">
@@ -20,11 +22,26 @@ import { RefreshStatus } from '../../models/common.model';
       </div>
 
       <div class="topbar-actions">
-        <!-- Refresh status -->
-        <div class="refresh-indicator me-2" [class.refreshing]="refreshing()">
-          <i class="bi bi-arrow-clockwise"></i>
-          <span>{{ refreshLabel() }}</span>
-        </div>
+        <!-- Last updated time -->
+        @if (lastRefreshed()) {
+          <div class="last-updated" [class.refreshing]="refreshing()" title="Last data refresh time">
+            <i class="bi bi-arrow-clockwise" [class.spin]="refreshing()"></i>
+            <span>Updated {{ lastRefreshedLabel() }}</span>
+          </div>
+        }
+
+        <!-- Refresh interval selector -->
+        <select
+          class="form-select form-select-sm"
+          style="width:auto;font-size:12px;"
+          [ngModel]="refreshIntervalSvc.interval()"
+          (ngModelChange)="refreshIntervalSvc.set($event)"
+          title="Auto-refresh interval"
+        >
+          @for (opt of refreshIntervalSvc.options; track opt.value) {
+            <option [value]="opt.value">{{ opt.label }}</option>
+          }
+        </select>
 
         <!-- Manual refresh -->
         <button class="btn btn-sm btn-icon btn-outline-secondary" (click)="triggerRefresh()" title="Refresh all data">
@@ -90,14 +107,16 @@ import { RefreshStatus } from '../../models/common.model';
 export class HeaderComponent {
   protected readonly authService = inject(AuthService);
   protected readonly themeService = inject(ThemeService);
+  protected readonly refreshIntervalSvc = inject(RefreshIntervalService);
   private readonly router = inject(Router);
   private readonly api = inject(ApiClientService);
+  private readonly queryClient = injectQueryClient();
 
   readonly user = this.authService.currentUser;
   readonly showUserMenu = signal(false);
   readonly pageTitle = signal('Dashboard');
   readonly refreshing = signal(false);
-  readonly refreshLabel = signal('');
+  readonly lastRefreshed = signal<Date | null>(null);
 
   constructor() {
     this.router.events
@@ -106,6 +125,18 @@ export class HeaderComponent {
         this.pageTitle.set(this.getTitleFromRoute());
         this.showUserMenu.set(false);
       });
+
+    this.queryClient.getQueryCache().subscribe((event) => {
+      if (event?.type === 'updated' && (event as any).action?.type === 'success') {
+        this.lastRefreshed.set(new Date());
+      }
+    });
+  }
+
+  lastRefreshedLabel(): string {
+    const d = this.lastRefreshed();
+    if (!d) return '';
+    return d.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit', second: '2-digit' });
   }
 
   toggleUserMenu(): void {
@@ -118,16 +149,13 @@ export class HeaderComponent {
 
   triggerRefresh(): void {
     this.refreshing.set(true);
-    this.refreshLabel.set('Refreshing...');
     this.api.post('/system/refresh').subscribe({
       complete: () => {
         this.refreshing.set(false);
-        this.refreshLabel.set('Refreshed ' + new Date().toLocaleTimeString());
-        setTimeout(() => this.refreshLabel.set(''), 4000);
+        void this.queryClient.invalidateQueries();
       },
       error: () => {
         this.refreshing.set(false);
-        this.refreshLabel.set('');
       },
     });
   }

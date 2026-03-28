@@ -4,6 +4,7 @@ import { RouterModule } from '@angular/router';
 import { injectQuery } from '@tanstack/angular-query-experimental';
 import { firstValueFrom } from 'rxjs';
 import { ApiClientService } from '../../core/http/api-client.service';
+import { RefreshIntervalService } from '../../core/refresh/refresh-interval.service';
 import { StatCardComponent } from '../../shared/components/stat-card/stat-card.component';
 import { LoadingSpinnerComponent } from '../../shared/components/loading-spinner/loading-spinner.component';
 import { StatusBadgeComponent } from '../../shared/components/status-badge/status-badge.component';
@@ -19,14 +20,6 @@ import { DashboardSummary } from '../../models/common.model';
         <h1>Dashboard</h1>
         <p>Operational overview of your DevOps and MLOps infrastructure</p>
       </div>
-      <div class="page-header-actions">
-        <span style="font-size:11.5px;color:var(--dc-text-muted)">
-          <i class="bi bi-clock me-1"></i>
-          @if (summaryQuery.data()?.lastRefresh) {
-            Last updated: {{ formatTime(summaryQuery.data()!.lastRefresh) }}
-          }
-        </span>
-      </div>
     </div>
 
     @if (summaryQuery.isPending()) {
@@ -35,7 +28,7 @@ import { DashboardSummary } from '../../models/common.model';
       <div class="error-state">
         <i class="bi bi-exclamation-triangle-fill"></i>
         <h5>Failed to load dashboard</h5>
-        <p>{{ summaryQuery.error()?.message }}</p>
+        <p>{{ summaryQuery.error().message }}</p>
         <button class="btn btn-sm btn-primary mt-2" (click)="summaryQuery.refetch()">Retry</button>
       </div>
     } @else if (summaryQuery.data(); as data) {
@@ -237,12 +230,13 @@ import { DashboardSummary } from '../../models/common.model';
 })
 export class DashboardComponent {
   private readonly api = inject(ApiClientService);
+  private readonly refreshIntervalSvc = inject(RefreshIntervalService);
 
   readonly summaryQuery = injectQuery(() => ({
     queryKey: ['dashboard', 'summary'],
     queryFn: () => firstValueFrom(this.api.get<DashboardSummary>('/dashboard/summary')),
     staleTime: 30_000,
-    refetchInterval: 60_000,
+    refetchInterval: this.refreshIntervalSvc.interval(),
   }));
 
   readonly quickLinks = [

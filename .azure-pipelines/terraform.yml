@@ -1,0 +1,165 @@
+# Terraform pipeline — triggers only when terraform/ changes.
+#
+# Required variable groups:
+#
+#   devops-console-gcp
+#     GCP_PROJECT_ID     — GCP project ID
+#     GCP_REGION         — e.g. us-central1
+#     GCP_SA_KEY         — (secret) service account JSON key with roles:
+#                            Editor (or scoped: Cloud Run Admin, Redis Admin,
+#                            Artifact Registry Admin, Secret Manager Admin,
+#                            Service Account Admin, Project IAM Admin)
+#     ENV                — target environment label (dev / staging / prod)
+#
+#   devops-console-tf
+#     TF_STATE_BUCKET    — GCS bucket that holds the Terraform state file
+#     TF_VAR_backend_image   — current backend image URI
+#     TF_VAR_frontend_image  — current frontend image URI
+#     TF_VAR_allowed_origins — frontend Cloud Run URL (empty on first run)
+#     TF_VAR_session_secret  — (secret) express-session signing secret
+
+trigger:
+  branches:
+    include:
+      - main
+  paths:
+    include:
+      - terraform/**
+
+pr:
+  branches:
+    include:
+      - '*'
+  paths:
+    include:
+      - terraform/**
+
+variables:
+  - group: devops-console-gcp
+  - group: devops-console-tf
+  - name: TF_VERSION
+    value: '1.9.8'
+  - name: TF_WORKING_DIR
+    value: terraform
+
+pool:
+  vmImage: ubuntu-latest
+
+stages:
+
+  # ── Plan — runs on every push and pull request ────────────────────────────
+  - stage: plan
+    displayName: Terraform Plan
+    jobs:
+      - job: tf_plan
+        displayName: Init & Plan
+        steps:
+          - script: |
+              wget -q https://releases.hashicorp.com/terraform/$(TF_VERSION)/terraform_$(TF_VERSION)_linux_amd64.zip
+              unzip -q terraform_$(TF_VERSION)_linux_amd64.zip
+              sudo mv terraform /usr/local/bin/
+              terraform version
+            displayName: Install Terraform $(TF_VERSION)
+
+          - script: |
+              echo '$(GCP_SA_KEY)' | gcloud auth activate-service-account --key-file=-
+              gcloud config set project $(GCP_PROJECT_ID)
+            displayName: Authenticate to GCP
+
+          - script: |
+              terraform init \
+                -backend-config="bucket=$(TF_STATE_BUCKET)" \
+                -backend-config="prefix=devops-console/$(ENV)" \
+                -input=false
+            displayName: Terraform init
+            workingDirectory: $(TF_WORKING_DIR)
+            env:
+              GOOGLE_APPLICATION_CREDENTIALS_CONTENT: $(GCP_SA_KEY)
+
+          - script: terraform validate
+            displayName: Terraform validate
+            workingDirectory: $(TF_WORKING_DIR)
+
+          - script: |
+              terraform plan \
+                -var="project_id=$(GCP_PROJECT_ID)" \
+                -var="region=$(GCP_REGION)" \
+                -var="env=$(ENV)" \
+                -var="backend_image=$(TF_VAR_backend_image)" \
+                -var="frontend_image=$(TF_VAR_frontend_image)" \
+                -var="allowed_origins=$(TF_VAR_allowed_origins)" \
+                -var="session_secret=$(TF_VAR_session_secret)" \
+                -out=tfplan \
+                -input=false
+            displayName: Terraform plan
+            workingDirectory: $(TF_WORKING_DIR)
+            env:
+              GOOGLE_CREDENTIALS: $(GCP_SA_KEY)
+
+          - task: PublishPipelineArtifact@1
+            displayName: Publish plan artifact
+            inputs:
+              targetPath: $(TF_WORKING_DIR)/tfplan
+              artifact: tfplan
+
+  # ── Apply — runs only on main, requires environment approval ─────────────
+  - stage: apply
+    displayName: Terraform Apply
+    dependsOn: plan
+    condition: and(succeeded(), eq(variables['Build.SourceBranch'], 'refs/heads/main'))
+    jobs:
+      - deployment: tf_apply
+        displayName: Apply plan
+        # Configure an approval check on this environment in Azure DevOps
+        # Pipelines → Environments → $(ENV) → Approvals and checks
+        environment: $(ENV)
+        strategy:
+          runOnce:
+            deploy:
+              steps:
+                - checkout: self
+
+                - script: |
+                    wget -q https://releases.hashicorp.com/terraform/$(TF_VERSION)/terraform_$(TF_VERSION)_linux_amd64.zip
+                    unzip -q terraform_$(TF_VERSION)_linux_amd64.zip
+                    sudo mv terraform /usr/local/bin/
+                  displayName: Install Terraform $(TF_VERSION)
+
+                - script: |
+                    echo '$(GCP_SA_KEY)' | gcloud auth activate-service-account --key-file=-
+                    gcloud config set project $(GCP_PROJECT_ID)
+                  displayName: Authenticate to GCP
+
+                - script: |
+                    terraform init \
+                      -backend-config="bucket=$(TF_STATE_BUCKET)" \
+                      -backend-config="prefix=devops-console/$(ENV)" \
+                      -input=false
+                  displayName: Terraform init
+                  workingDirectory: $(TF_WORKING_DIR)
+                  env:
+                    GOOGLE_CREDENTIALS: $(GCP_SA_KEY)
+
+                - task: DownloadPipelineArtifact@2
+                  displayName: Download plan artifact
+                  inputs:
+                    artifact: tfplan
+                    path: $(TF_WORKING_DIR)
+
+                - script: |
+                    terraform apply \
+                      -input=false \
+                      -auto-approve \
+                      tfplan
+                  displayName: Terraform apply
+                  workingDirectory: $(TF_WORKING_DIR)
+                  env:
+                    GOOGLE_CREDENTIALS: $(GCP_SA_KEY)
+
+                - script: |
+                    echo "##[section]Outputs"
+                    terraform output
+                  displayName: Show outputs
+                  workingDirectory: $(TF_WORKING_DIR)
+                  env:
+                    GOOGLE_CREDENTIALS: $(GCP_SA_KEY)

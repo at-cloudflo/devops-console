@@ -1,0 +1,12 @@
+project_id = "your-gcp-project-id"
+region     = "us-central1"
+env        = "dev"
+
+backend_image  = "us-central1-docker.pkg.dev/your-gcp-project-id/devops-console/backend:latest"
+frontend_image = "us-central1-docker.pkg.dev/your-gcp-project-id/devops-console/frontend:latest"
+
+session_secret = "replace-with-32-plus-random-chars-openssl-rand-base64-32"
+
+# Step 1: leave empty, run terraform apply, copy frontend_url from outputs
+# Step 2: paste the URL here, run terraform apply again to set CORS on the backend
+allowed_origins = ""

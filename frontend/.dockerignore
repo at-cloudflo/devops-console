@@ -1,0 +1,34 @@
+# ── Source — never needed in the image ────────────────────────────────────
+src/
+e2e/
+.angular/
+
+# ── Dependencies — installed by CI, not by Docker ─────────────────────────
+node_modules/
+
+# ── Build config — compile-time only ──────────────────────────────────────
+angular.json
+tsconfig*.json
+proxy.conf.json
+*.spec.ts
+
+# ── Secrets and environment files — must never enter the image ─────────────
+.env
+.env.*
+.npmrc
+.npmrc.example
+*.pem
+*.key
+
+# ── Documentation ─────────────────────────────────────────────────────────
+*.md
+
+# ── VCS ───────────────────────────────────────────────────────────────────
+.git/
+.gitignore
+.gitattributes
+
+# ── CI / IDE ──────────────────────────────────────────────────────────────
+.azure-pipelines/
+.vscode/
+.idea/

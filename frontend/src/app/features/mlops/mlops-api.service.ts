@@ -1,7 +1,7 @@
 import { Injectable, inject } from '@angular/core';
 import { firstValueFrom } from 'rxjs';
 import { ApiClientService } from '../../core/http/api-client.service';
-import { VertexJob, VertexJobDetail, VertexJobsResponse } from '../../models/mlops.model';
+import { VertexJobDetail, VertexJobsResponse } from '../../models/mlops.model';
 import { ApiResponse } from '../../models/common.model';
 
 @Injectable({ providedIn: 'root' })
@@ -13,6 +13,8 @@ export class MlopsApiService {
     region?: string;
     state?: string;
     search?: string;
+    page?: number;
+    limit?: number;
     refresh?: boolean;
   }): Promise<VertexJobsResponse> {
     return firstValueFrom(this.api.get<VertexJobsResponse>('/mlops/vertex/jobs', params));

@@ -1,0 +1,144 @@
+# ──────────────────────────────────────────────────────────────────────────────
+# Frontend pipeline — triggers only when frontend/ changes.
+#
+# Build strategy:
+#   CI agent  →  installs from private registry, compiles Angular, publishes dist/
+#   Docker    →  copies pre-built dist/ only (no npm, no credentials in image)
+#
+# Required variable group: devops-console-gcp
+#   GCP_PROJECT_ID          — GCP project ID
+#   GCP_REGION              — e.g. us-central1
+#   GCP_SA_KEY              — (secret) SA key JSON  (Artifact Registry Writer, Cloud Run Developer)
+#   ENV                     — target environment: dev | staging | prod
+#   AZURE_ARTIFACTS_TOKEN   — (secret) PAT with Azure Artifacts read scope
+#                             (only needed when using a private Azure Artifacts npm feed)
+# ──────────────────────────────────────────────────────────────────────────────
+
+trigger:
+  branches:
+    include:
+      - main
+  paths:
+    include:
+      - frontend/**
+
+pr:
+  branches:
+    include:
+      - '*'
+  paths:
+    include:
+      - frontend/**
+
+variables:
+  - group: devops-console-gcp
+  - name: IMAGE
+    value: $(GCP_REGION)-docker.pkg.dev/$(GCP_PROJECT_ID)/devops-console/frontend
+  - name: NODE_VERSION
+    value: '22.x'
+
+pool:
+  vmImage: ubuntu-latest
+
+stages:
+
+  # ── Stage 1: CI — install, lint, build ───────────────────────────────────
+  - stage: ci
+    displayName: Lint & Build
+    jobs:
+      - job: build
+        displayName: Angular build
+        steps:
+          - task: NodeTool@0
+            displayName: Use Node.js $(NODE_VERSION)
+            inputs:
+              versionSpec: $(NODE_VERSION)
+
+          # Authenticate to the private npm registry.
+          # The npmAuthenticate task writes a temporary .npmrc with a short-lived
+          # token. Credentials are scoped to this job and never leave the agent.
+          - task: npmAuthenticate@0
+            displayName: Authenticate to private npm registry
+            inputs:
+              workingFile: frontend/.npmrc
+            # Remove this task if you use only the public npm registry.
+
+          - script: npm ci
+            displayName: Install dependencies (npm ci)
+            workingDirectory: frontend
+
+          - script: npm run lint
+            displayName: Lint
+            workingDirectory: frontend
+
+          - script: npm run build -- --configuration production
+            displayName: Production build (ng build)
+            workingDirectory: frontend
+
+          # Publish the compiled dist/ as a pipeline artifact so the CD stage
+          # can download it onto a fresh agent for the Docker build.
+          - task: PublishPipelineArtifact@1
+            displayName: Publish dist artifact
+            inputs:
+              targetPath: frontend/dist
+              artifact: frontend-dist
+              publishLocation: pipeline
+
+  # ── Stage 2: CD — docker build → push → deploy ───────────────────────────
+  # Runs only on main branch after CI passes.
+  - stage: cd
+    displayName: Push & Deploy
+    dependsOn: ci
+    condition: and(succeeded(), eq(variables['Build.SourceBranch'], 'refs/heads/main'))
+    jobs:
+      - deployment: deploy
+        displayName: Build image → push → deploy
+        environment: $(ENV)
+        strategy:
+          runOnce:
+            deploy:
+              steps:
+                # Check out only the Dockerfile and nginx.conf — not the full source.
+                - checkout: self
+                  sparse: true
+                  fetchDepth: 1
+
+                # Download the dist artifact published by the CI stage.
+                # Placed at frontend/dist so the COPY in the Dockerfile resolves correctly.
+                - task: DownloadPipelineArtifact@2
+                  displayName: Download dist artifact
+                  inputs:
+                    artifact: frontend-dist
+                    targetPath: $(Build.SourcesDirectory)/frontend/dist
+
+                - script: |
+                    echo '$(GCP_SA_KEY)' | gcloud auth activate-service-account --key-file=-
+                    gcloud auth configure-docker $(GCP_REGION)-docker.pkg.dev --quiet
+                  displayName: Authenticate to GCP
+
+                # Docker build — no npm install inside; just COPYs the pre-built dist/.
+                # Context is frontend/ so Dockerfile can reach dist/ and nginx.conf.
+                - script: |
+                    docker build \
+                      --no-cache \
+                      --pull \
+                      --label "build.id=$(Build.BuildId)" \
+                      --label "build.branch=$(Build.SourceBranchName)" \
+                      --label "build.commit=$(Build.SourceVersion)" \
+                      -t $(IMAGE):$(Build.BuildId) \
+                      -t $(IMAGE):latest \
+                      frontend/
+                  displayName: Build Docker image
+
+                - script: |
+                    docker push $(IMAGE):$(Build.BuildId)
+                    docker push $(IMAGE):latest
+                  displayName: Push to Artifact Registry
+
+                - script: |
+                    gcloud run deploy devops-console-$(ENV)-ui \
+                      --image   $(IMAGE):$(Build.BuildId) \
+                      --region  $(GCP_REGION) \
+                      --project $(GCP_PROJECT_ID) \
+                      --quiet
+                  displayName: Deploy to Cloud Run

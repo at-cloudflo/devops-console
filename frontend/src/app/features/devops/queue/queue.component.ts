@@ -1,18 +1,22 @@
 import { Component, inject, signal } from '@angular/core';
-import { CommonModule, DecimalPipe } from '@angular/common';
+import { CommonModule } from '@angular/common';
 import { FormsModule } from '@angular/forms';
 import { injectQuery } from '@tanstack/angular-query-experimental';
 import { DevopsApiService } from '../devops-api.service';
+import { RefreshIntervalService } from '../../../core/refresh/refresh-interval.service';
 import { QueueJob } from '../../../models/devops.model';
 import { PageHeaderComponent } from '../../../shared/components/page-header/page-header.component';
 import { StatusBadgeComponent } from '../../../shared/components/status-badge/status-badge.component';
 import { LoadingSpinnerComponent } from '../../../shared/components/loading-spinner/loading-spinner.component';
 import { StatCardComponent } from '../../../shared/components/stat-card/stat-card.component';
+import { PaginatorComponent } from '../../../shared/components/paginator/paginator.component';
+import { DurationPipe } from '../../../shared/pipes/duration.pipe';
+import { LocalDatePipe } from '../../../shared/pipes/local-date.pipe';
 
 @Component({
   selector: 'app-queue',
   standalone: true,
-  imports: [CommonModule, FormsModule, PageHeaderComponent, StatusBadgeComponent, LoadingSpinnerComponent, StatCardComponent],
+  imports: [CommonModule, FormsModule, PageHeaderComponent, StatusBadgeComponent, LoadingSpinnerComponent, StatCardComponent, PaginatorComponent, DurationPipe, LocalDatePipe],
   template: `
     <app-page-header
       title="Job Queue"
@@ -40,23 +44,23 @@ import { StatCardComponent } from '../../../shared/components/stat-card/stat-car
     <div class="filters-bar">
       <div class="input-group input-group-sm" style="max-width:200px">
         <span class="input-group-text"><i class="bi bi-search"></i></span>
-        <input type="text" class="form-control" placeholder="Search..." [(ngModel)]="searchTerm" />
+        <input type="text" class="form-control" placeholder="Search..." [(ngModel)]="searchTerm" (ngModelChange)="onFilterChange()" />
       </div>
-      <select class="form-select form-select-sm" style="max-width:150px" [(ngModel)]="statusFilter">
+      <select class="form-select form-select-sm" style="max-width:150px" [(ngModel)]="statusFilter" (ngModelChange)="onFilterChange()">
         <option value="">All Statuses</option>
         <option value="queued">Queued</option>
         <option value="running">Running</option>
         <option value="completed">Completed</option>
         <option value="failed">Failed</option>
       </select>
-      <select class="form-select form-select-sm" style="max-width:140px" [(ngModel)]="sinceHours" (change)="queueQuery.refetch()">
+      <select class="form-select form-select-sm" style="max-width:140px" [(ngModel)]="sinceHours" (ngModelChange)="onFilterChange()">
         <option [value]="3">Last 3h</option>
         <option [value]="6">Last 6h</option>
         <option [value]="12">Last 12h</option>
         <option [value]="24">Last 24h</option>
       </select>
       <div class="ms-auto" style="font-size:12px;color:var(--dc-text-muted)">
-        {{ filtered().length }} jobs
+        {{ queueQuery.data()?.total ?? 0 }} jobs
       </div>
     </div>
 
@@ -95,10 +99,10 @@ import { StatCardComponent } from '../../../shared/components/stat-card/stat-car
                   <td class="text-muted" style="font-size:12.5px">{{ job.project }}</td>
                   <td class="text-muted" style="font-size:12px">{{ job.pool }}</td>
                   <td style="font-size:12px">{{ shortEmail(job.requestedBy) }}</td>
-                  <td style="font-size:12px;color:var(--dc-text-muted)">{{ formatDate(job.requestedAt) }}</td>
+                  <td style="font-size:12px;color:var(--dc-text-muted)">{{ job.requestedAt | localDate }}</td>
                   <td style="font-size:12px">
                     <span [class.text-danger]="job.queueDurationSeconds > 3600" [class.text-warning]="job.queueDurationSeconds > 1800 && job.queueDurationSeconds <= 3600">
-                      {{ formatDuration(job.queueDurationSeconds) }}
+                      {{ job.queueDurationSeconds | duration }}
                     </span>
                   </td>
                   <td><app-status-badge [status]="job.status"></app-status-badge></td>
@@ -119,48 +123,55 @@ import { StatCardComponent } from '../../../shared/components/stat-card/stat-car
             </tbody>
           </table>
         </div>
+        @if (queueQuery.data(); as resp) {
+          <app-paginator
+            [page]="page()"
+            [pageSize]="pageSize()"
+            [total]="resp.total"
+            [totalPages]="resp.totalPages"
+            (pageChange)="page.set($event)"
+            (pageSizeChange)="pageSize.set($event)"
+          ></app-paginator>
+        }
       </div>
     }
   `
 })
 export class QueueComponent {
   private readonly devopsApi = inject(DevopsApiService);
+  private readonly refreshIntervalSvc = inject(RefreshIntervalService);
   searchTerm = '';
   statusFilter = '';
   sinceHours = 6;
+  readonly page = signal(1);
+  readonly pageSize = signal(25);
 
   readonly queueQuery = injectQuery(() => ({
-    queryKey: ['devops', 'queue', this.sinceHours],
-    queryFn: () => this.devopsApi.getQueue({ sinceHours: this.sinceHours }),
+    queryKey: ['devops', 'queue', this.sinceHours, this.statusFilter, this.searchTerm, this.page(), this.pageSize()],
+    queryFn: () => this.devopsApi.getQueue({
+      sinceHours: this.sinceHours,
+      status: this.statusFilter || undefined,
+      search: this.searchTerm || undefined,
+      page: this.page(),
+      limit: this.pageSize(),
+    }),
     staleTime: 15_000,
-    refetchInterval: 30_000,
+    refetchInterval: this.refreshIntervalSvc.interval(),
   }));
 
+  onFilterChange(): void {
+    this.page.set(1);
+  }
+
   filtered(): QueueJob[] {
-    let jobs = this.queueQuery.data()?.data ?? [];
-    if (this.statusFilter) jobs = jobs.filter((j) => j.status === this.statusFilter);
-    if (this.searchTerm) {
-      const q = this.searchTerm.toLowerCase();
-      jobs = jobs.filter((j) => j.pipelineName.toLowerCase().includes(q) || j.project.toLowerCase().includes(q));
-    }
-    return jobs.sort((a, b) => new Date(b.requestedAt).getTime() - new Date(a.requestedAt).getTime());
+    return this.queueQuery.data()?.data ?? [];
   }
 
   countByStatus(status: string): number {
-    return (this.queueQuery.data()?.data ?? []).filter((j) => j.status === status).length;
+    return this.filtered().filter((j) => j.status === status).length;
   }
 
   shortEmail(email: string): string {
     return email.split('@')[0];
-  }
-
-  formatDate(iso: string): string {
-    return new Date(iso).toLocaleString();
-  }
-
-  formatDuration(seconds: number): string {
-    if (seconds < 60) return `${seconds}s`;
-    if (seconds < 3600) return `${Math.floor(seconds / 60)}m ${seconds % 60}s`;
-    return `${Math.floor(seconds / 3600)}h ${Math.floor((seconds % 3600) / 60)}m`;
   }
 }

@@ -3,16 +3,21 @@ import { CommonModule } from '@angular/common';
 import { FormsModule } from '@angular/forms';
 import { injectQuery } from '@tanstack/angular-query-experimental';
 import { MlopsApiService } from '../mlops-api.service';
+import { RefreshIntervalService } from '../../../core/refresh/refresh-interval.service';
 import { VertexJob, VertexJobDetail, VertexJobState } from '../../../models/mlops.model';
 import { PageHeaderComponent } from '../../../shared/components/page-header/page-header.component';
 import { StatCardComponent } from '../../../shared/components/stat-card/stat-card.component';
 import { StatusBadgeComponent } from '../../../shared/components/status-badge/status-badge.component';
 import { LoadingSpinnerComponent } from '../../../shared/components/loading-spinner/loading-spinner.component';
+import { PaginatorComponent } from '../../../shared/components/paginator/paginator.component';
+import { RelativeTimePipe } from '../../../shared/pipes/relative-time.pipe';
+import { DurationPipe } from '../../../shared/pipes/duration.pipe';
+import { LocalDatePipe } from '../../../shared/pipes/local-date.pipe';
 
 @Component({
   selector: 'app-vertex-jobs',
   standalone: true,
-  imports: [CommonModule, FormsModule, PageHeaderComponent, StatCardComponent, StatusBadgeComponent, LoadingSpinnerComponent],
+  imports: [CommonModule, FormsModule, PageHeaderComponent, StatCardComponent, StatusBadgeComponent, LoadingSpinnerComponent, PaginatorComponent, RelativeTimePipe, DurationPipe, LocalDatePipe],
   template: `
     <app-page-header
       title="Vertex AI Jobs"
@@ -67,7 +72,7 @@ import { LoadingSpinnerComponent } from '../../../shared/components/loading-spin
         <option value="PIPELINE_STATE_CANCELLED">Cancelled</option>
       </select>
       <div class="ms-auto" style="font-size:12px;color:var(--dc-text-muted)">
-        {{ filtered().length }} jobs
+        {{ jobsQuery.data()?.total ?? 0 }} jobs
       </div>
     </div>
 
@@ -120,7 +125,7 @@ import { LoadingSpinnerComponent } from '../../../shared/components/loading-spin
                     <app-status-badge [status]="normalizeState(job.state)"></app-status-badge>
                   </td>
                   <td style="font-size:12px;color:var(--dc-text-muted)">
-                    {{ job.startTime ? formatRelativeTime(job.startTime) : '—' }}
+                    {{ job.startTime | relativeTime }}
                   </td>
                   <td style="font-size:12px">
                     {{ job.durationSeconds != null ? formatDuration(job.durationSeconds) : isRunning(job.state) ? runningDuration(job.startTime) : '—' }}
@@ -157,12 +162,12 @@ import { LoadingSpinnerComponent } from '../../../shared/components/loading-spin
                                 <div><span class="text-muted">Full ID:</span> <span class="font-mono ms-2" style="font-size:11px">{{ detail.id }}</span></div>
                                 <div><span class="text-muted">Project:</span> <span class="ms-2">{{ detail.projectId }}</span></div>
                                 <div><span class="text-muted">Region:</span> <span class="ms-2">{{ detail.region }}</span></div>
-                                <div><span class="text-muted">Created:</span> <span class="ms-2">{{ formatDate(detail.createTime) }}</span></div>
+                                <div><span class="text-muted">Created:</span> <span class="ms-2">{{ detail.createTime | localDate }}</span></div>
                                 @if (detail.startTime) {
-                                  <div><span class="text-muted">Started:</span> <span class="ms-2">{{ formatDate(detail.startTime) }}</span></div>
+                                  <div><span class="text-muted">Started:</span> <span class="ms-2">{{ detail.startTime | localDate }}</span></div>
                                 }
                                 @if (detail.endTime) {
-                                  <div><span class="text-muted">Ended:</span> <span class="ms-2">{{ formatDate(detail.endTime) }}</span></div>
+                                  <div><span class="text-muted">Ended:</span> <span class="ms-2">{{ detail.endTime | localDate }}</span></div>
                                 }
                                 @if (detail.error) {
                                   <div class="mt-2 p-2 rounded" style="background:rgba(239,68,68,.08);border:1px solid rgba(239,68,68,.15)">
@@ -192,7 +197,7 @@ import { LoadingSpinnerComponent } from '../../../shared/components/loading-spin
                                 @for (h of detail.stateHistory; track h.timestamp) {
                                   <div class="d-flex align-items-center gap-2" style="font-size:12px">
                                     <app-status-badge [status]="normalizeState(h.state)"></app-status-badge>
-                                    <span class="text-muted">{{ formatDate(h.timestamp) }}</span>
+                                    <span class="text-muted">{{ h.timestamp | localDate }}</span>
                                   </div>
                                 }
                               </div>
@@ -236,6 +241,16 @@ import { LoadingSpinnerComponent } from '../../../shared/components/loading-spin
             </tbody>
           </table>
         </div>
+        @if (jobsQuery.data(); as resp) {
+          <app-paginator
+            [page]="page()"
+            [pageSize]="pageSize()"
+            [total]="resp.total"
+            [totalPages]="resp.totalPages"
+            (pageChange)="page.set($event)"
+            (pageSizeChange)="pageSize.set($event)"
+          ></app-paginator>
+        }
       </div>
     }
   `,
@@ -245,7 +260,10 @@ import { LoadingSpinnerComponent } from '../../../shared/components/loading-spin
 })
 export class VertexJobsComponent {
   private readonly mlopsApi = inject(MlopsApiService);
+  private readonly refreshIntervalSvc = inject(RefreshIntervalService);
   readonly selectedJobId = signal<string | null>(null);
+  readonly page = signal(1);
+  readonly pageSize = signal(25);
 
   searchTerm = '';
   projectFilter = '';
@@ -253,15 +271,17 @@ export class VertexJobsComponent {
   stateFilter = '';
 
   readonly jobsQuery = injectQuery(() => ({
-    queryKey: ['mlops', 'vertex', 'jobs', this.projectFilter, this.regionFilter, this.stateFilter, this.searchTerm],
+    queryKey: ['mlops', 'vertex', 'jobs', this.projectFilter, this.regionFilter, this.stateFilter, this.searchTerm, this.page(), this.pageSize()],
     queryFn: () => this.mlopsApi.getVertexJobs({
       projectId: this.projectFilter || undefined,
       region: this.regionFilter || undefined,
       state: this.stateFilter || undefined,
       search: this.searchTerm || undefined,
+      page: this.page(),
+      limit: this.pageSize(),
     }),
     staleTime: 30_000,
-    refetchInterval: 60_000,
+    refetchInterval: this.refreshIntervalSvc.interval(),
   }));
 
   readonly detailQuery = injectQuery(() => ({
@@ -272,7 +292,7 @@ export class VertexJobsComponent {
   }));
 
   onFilterChange(): void {
-    // Query key reactivity handles the refetch automatically
+    this.page.set(1);
   }
 
   refresh(): void {
@@ -314,20 +334,6 @@ export class VertexJobsComponent {
     if (m < 60) return `${m}m ${seconds % 60}s`;
     const h = Math.floor(m / 60);
     return `${h}h ${m % 60}m`;
-  }
-
-  formatRelativeTime(iso: string): string {
-    const diff = Date.now() - new Date(iso).getTime();
-    const m = Math.floor(diff / 60000);
-    if (m < 1) return 'Just now';
-    if (m < 60) return `${m}m ago`;
-    const h = Math.floor(m / 60);
-    if (h < 24) return `${h}h ago`;
-    return `${Math.floor(h / 24)}d ago`;
-  }
-
-  formatDate(iso: string): string {
-    return new Date(iso).toLocaleString();
   }
 
   shortId(id: string): string {

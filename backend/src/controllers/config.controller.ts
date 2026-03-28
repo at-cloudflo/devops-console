@@ -1,6 +1,8 @@
 import { Request, Response } from 'express';
 import * as configService from '../services/config.service';
 import { SystemConfig } from '../models/config.model';
+import { sendTeamsAlert } from '../services/teams-webhook.service';
+import { Alert } from '../models/alert.model';
 
 export function getConfig(req: Request, res: Response): void {
   const config = configService.getConfig();
@@ -18,6 +20,7 @@ export function updateConfig(req: Request, res: Response): void {
       refreshIntervals: { ...current.refreshIntervals, ...updates.refreshIntervals },
       featureFlags: { ...current.featureFlags, ...updates.featureFlags },
       displayConfig: { ...current.displayConfig, ...updates.displayConfig },
+      teamsNotifications: { ...current.teamsNotifications, ...updates.teamsNotifications },
       updatedBy: req.session?.user?.email ?? 'unknown',
     };
     configService.saveConfig(merged);
@@ -25,6 +28,34 @@ export function updateConfig(req: Request, res: Response): void {
   } catch (err) {
     console.error('[config] updateConfig error:', err);
     res.status(500).json({ error: 'Failed to save configuration' });
+  }
+}
+
+export async function testTeamsWebhook(req: Request, res: Response): Promise<void> {
+  const { webhookUrl } = req.body as { webhookUrl?: string };
+  if (!webhookUrl) {
+    res.status(400).json({ error: 'webhookUrl is required' });
+    return;
+  }
+  const testAlert: Alert = {
+    id: 'test-message',
+    type: 'system',
+    severity: 'info',
+    source: 'DevOps Console',
+    sourceId: 'test',
+    message: 'This is a test notification from DevOps Console. Your Teams webhook is configured correctly.',
+    startedAt: new Date().toISOString(),
+    updatedAt: new Date().toISOString(),
+    status: 'open',
+    acknowledged: false,
+    metadata: {},
+  };
+  try {
+    await sendTeamsAlert(testAlert, webhookUrl, 'new');
+    res.json({ success: true });
+  } catch (err) {
+    const message = err instanceof Error ? err.message : 'Webhook delivery failed';
+    res.status(502).json({ error: message });
   }
 }
 

@@ -1,0 +1,35 @@
+# ── Source — compiled by CI, not needed in the image ─────────────────────
+src/
+
+# ── Dev dependencies ── stripped by `npm prune --omit=dev` before docker build
+# node_modules IS needed (the pruned production version), so it is NOT ignored.
+# Only the cache sub-directory can be omitted.
+node_modules/.cache
+
+# ── TypeScript config — compile-time only ─────────────────────────────────
+tsconfig*.json
+
+# ── Secrets and environment files — must never enter the image ─────────────
+.env
+.env.*
+.npmrc
+.npmrc.example
+*.pem
+*.key
+
+# ── Tests ─────────────────────────────────────────────────────────────────
+**/*.spec.ts
+**/*.test.ts
+
+# ── Documentation ─────────────────────────────────────────────────────────
+*.md
+
+# ── VCS ───────────────────────────────────────────────────────────────────
+.git/
+.gitignore
+.gitattributes
+
+# ── CI / IDE ──────────────────────────────────────────────────────────────
+.azure-pipelines/
+.vscode/
+.idea/

@@ -61,6 +61,15 @@ export interface DisplayConfig {
   pageSize: number;
 }
 
+export interface TeamsNotificationsConfig {
+  enabled: boolean;
+  webhookUrl: string;
+  minSeverity: 'info' | 'warning' | 'critical';
+  notifyOnNew: boolean;
+  notifyOnEscalation: boolean;
+  notifyOnResolution: boolean;
+}
+
 export interface SystemConfig {
   azureDevOpsOrgs: AzureDevOpsOrg[];
   monitoredProjects: MonitoredProject[];
@@ -70,6 +79,7 @@ export interface SystemConfig {
   refreshIntervals: RefreshIntervals;
   featureFlags: FeatureFlags;
   displayConfig: DisplayConfig;
+  teamsNotifications: TeamsNotificationsConfig;
   updatedAt: string;
   updatedBy: string;
 }

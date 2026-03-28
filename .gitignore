@@ -49,3 +49,5 @@ backend/src/data/config.runtime.json
 
 # Cache
 .cache/
+
+backlog.txt

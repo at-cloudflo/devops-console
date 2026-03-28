@@ -45,5 +45,8 @@ export interface VertexJobsSummary {
 export interface VertexJobsResponse {
   data: VertexJob[];
   total: number;
+  page: number;
+  pageSize: number;
+  totalPages: number;
   summary: VertexJobsSummary;
 }

@@ -46,6 +46,19 @@ export interface RefreshIntervals {
   alertsMs: number;
 }
 
+export interface TeamsNotificationsConfig {
+  enabled: boolean;
+  webhookUrl: string;
+  /** Minimum severity to notify: 'info' | 'warning' | 'critical' */
+  minSeverity: 'info' | 'warning' | 'critical';
+  /** Send notification when a new alert fires */
+  notifyOnNew: boolean;
+  /** Send notification when an alert escalates from warning → critical */
+  notifyOnEscalation: boolean;
+  /** Send notification when an alert is resolved */
+  notifyOnResolution: boolean;
+}
+
 export interface FeatureFlags {
   enableApprovalActions: boolean;
   enableAlertNotifications: boolean;
@@ -70,6 +83,7 @@ export interface SystemConfig {
   refreshIntervals: RefreshIntervals;
   featureFlags: FeatureFlags;
   displayConfig: DisplayConfig;
+  teamsNotifications: TeamsNotificationsConfig;
   updatedAt: string;
   updatedBy: string;
 }

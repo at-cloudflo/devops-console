@@ -3,6 +3,7 @@ import * as cacheService from '../cache/cache.service';
 import { PoolSummary, AgentDetail, QueueJob, PendingApproval } from '../models/devops.model';
 import { VertexJob } from '../models/mlops.model';
 import * as configService from './config.service';
+import { sendTeamsAlert } from './teams-webhook.service';
 
 // In-memory alert store for POC
 const alertStore = new Map<string, Alert>();
@@ -147,6 +148,28 @@ export function runAlertEngine(): void {
   }
 }
 
+const SEVERITY_RANK: Record<AlertSeverity, number> = { info: 0, warning: 1, critical: 2 };
+
+function shouldNotify(severity: AlertSeverity, minSeverity: AlertSeverity): boolean {
+  return SEVERITY_RANK[severity] >= SEVERITY_RANK[minSeverity];
+}
+
+function fireNotification(alert: Alert, event: 'new' | 'escalated' | 'resolved'): void {
+  const teamsConfig = configService.getConfig().teamsNotifications;
+  const webhookUrl = teamsConfig.webhookUrl || process.env.TEAMS_WEBHOOK_URL || '';
+
+  if (!teamsConfig.enabled || !webhookUrl) return;
+  if (event === 'new' && !teamsConfig.notifyOnNew) return;
+  if (event === 'escalated' && !teamsConfig.notifyOnEscalation) return;
+  if (event === 'resolved' && !teamsConfig.notifyOnResolution) return;
+  if (event !== 'resolved' && !shouldNotify(alert.severity, teamsConfig.minSeverity)) return;
+
+  // Fire and forget — alert engine must not block on webhook delivery
+  sendTeamsAlert(alert, webhookUrl, event).catch((err: unknown) => {
+    console.error('[teams-webhook] Failed to send notification:', err);
+  });
+}
+
 function upsertAlert(
   id: string,
   data: {
@@ -160,13 +183,17 @@ function upsertAlert(
 ): void {
   const existing = alertStore.get(id);
   const now = new Date().toISOString();
+
   if (existing && existing.status !== 'resolved') {
+    const escalated = SEVERITY_RANK[data.severity] > SEVERITY_RANK[existing.severity];
     existing.message = data.message;
     existing.severity = data.severity;
     existing.updatedAt = now;
     existing.metadata = data.metadata;
+    if (escalated) fireNotification(existing, 'escalated');
     return;
   }
+
   const alert: Alert = {
     id,
     type: data.type,
@@ -181,6 +208,7 @@ function upsertAlert(
     metadata: data.metadata,
   };
   alertStore.set(id, alert);
+  fireNotification(alert, 'new');
 }
 
 function resolveAlertBySourceId(id: string): void {
@@ -189,5 +217,6 @@ function resolveAlertBySourceId(id: string): void {
     alert.status = 'resolved';
     alert.resolvedAt = new Date().toISOString();
     alert.updatedAt = new Date().toISOString();
+    fireNotification(alert, 'resolved');
   }
 }

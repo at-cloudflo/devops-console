@@ -3,24 +3,29 @@
 // Brand color: #8e2157  |  Theme: Bootstrap 5 + Custom
 // ============================================================
 
-// --- Custom Bootstrap variable overrides (MUST come before Bootstrap import) ---
+// @use must come before any variable declarations in Sass modules.
+// Bootstrap overrides are passed via the with() configuration block.
+@use "bootstrap/scss/bootstrap" with (
+  $primary:                  #8e2157,
+  $link-color:               #8e2157,
+  $link-hover-color:         #6b1842,
+  $btn-border-radius:        0.375rem,
+  $card-border-radius:       0.5rem,
+  $input-focus-border-color: #8e2157,
+  $input-focus-box-shadow:   0 0 0 0.2rem rgba(142, 33, 87, 0.25),
+);
+@use "bootstrap-icons/font/bootstrap-icons";
+
+// --- Local Sass variables (must follow @use rules) ---
 $primary:          #8e2157;
 $primary-dark:     #6b1842;
 $primary-light:    #b5346e;
 $primary-subtle:   #f5e6ee;
 
-// Bootstrap overrides
-$link-color:               $primary;
-$link-hover-color:         $primary-dark;
-$btn-border-radius:        0.375rem;
-$navbar-brand-color:       #fff;
-$input-focus-border-color: $primary;
-$input-focus-box-shadow:   0 0 0 0.2rem rgba($primary, 0.25);
-
 // Sidebar
 $sidebar-width:            260px;
 $sidebar-collapsed-width:  64px;
-$sidebar-bg-light:         #1e2139;
+$sidebar-bg-light:         #8e2157;
 $sidebar-text-light:       #c8cedf;
 $sidebar-active-light:     $primary;
 $sidebar-bg-dark:          #13152a;
@@ -29,14 +34,11 @@ $sidebar-bg-dark:          #13152a;
 $card-shadow:              0 1px 4px rgba(0, 0, 0, 0.08);
 $card-border-radius:       0.5rem;
 
-// --- Bootstrap core ---
-@import "bootstrap/scss/bootstrap";
-@import "bootstrap-icons/font/bootstrap-icons";
-
 // ============================================================
 // CSS Custom Properties (runtime theming)
 // ============================================================
 :root {
+  // App design tokens
   --dc-primary:         #{$primary};
   --dc-primary-dark:    #{$primary-dark};
   --dc-primary-light:   #{$primary-light};
@@ -55,6 +57,17 @@ $card-border-radius:       0.5rem;
   --dc-header-shadow:   0 1px 3px rgba(0,0,0,0.06);
   --dc-card-shadow:     #{$card-shadow};
   --dc-transition:      0.2s ease;
+
+  // Override Bootstrap CSS custom properties — Bootstrap 5.3 components
+  // consume these at runtime; without this the Sass variable override alone
+  // is not enough to replace Bootstrap's default blue (#0d6efd).
+  --bs-primary:             #8e2157;
+  --bs-primary-rgb:         142, 33, 87;
+  --bs-link-color:          #8e2157;
+  --bs-link-color-rgb:      142, 33, 87;
+  --bs-link-hover-color:    #6b1842;
+  --bs-link-hover-color-rgb: 107, 24, 66;
+  --bs-focus-ring-color:    rgba(142, 33, 87, 0.25);
 }
 
 // Dark theme overrides via data attribute on <html>
@@ -353,6 +366,22 @@ a {
     gap: 4px;
 
     &.refreshing i { animation: spin 1s linear infinite; }
+  }
+
+  .last-updated {
+    font-size: 11px;
+    color: var(--dc-text-muted);
+    display: flex;
+    align-items: center;
+    gap: 5px;
+    white-space: nowrap;
+    padding: 3px 8px;
+    border-radius: 6px;
+    background: var(--dc-card-bg);
+    border: 1px solid var(--dc-border-color);
+
+    i { font-size: 11px; transition: color .2s; }
+    &.refreshing i { animation: spin 1s linear infinite; color: var(--dc-primary); }
   }
 }
 
@@ -688,47 +717,47 @@ a {
   display: flex;
   align-items: center;
   justify-content: center;
-  background: linear-gradient(135deg, #1e2139 0%, #13152a 60%, #0f1117 100%);
+  background: #ffffff;
 
   .login-card {
     width: 100%;
-    max-width: 380px;
+    max-width: 480px;
     border-radius: 12px;
     overflow: hidden;
 
     .login-header {
       background: var(--dc-primary);
-      padding: 28px 24px;
+      padding: 40px 32px;
       text-align: center;
 
       .login-logo {
-        width: 52px;
-        height: 52px;
+        width: 64px;
+        height: 64px;
         background: rgba(255,255,255,0.15);
-        border-radius: 12px;
+        border-radius: 14px;
         display: flex;
         align-items: center;
         justify-content: center;
-        font-size: 24px;
+        font-size: 30px;
         color: white;
-        margin: 0 auto 14px;
+        margin: 0 auto 18px;
       }
 
       h2 {
         color: white;
-        font-size: 18px;
+        font-size: 22px;
         font-weight: 700;
-        margin: 0 0 4px;
+        margin: 0 0 6px;
       }
       p {
         color: rgba(255,255,255,0.75);
-        font-size: 12.5px;
+        font-size: 13.5px;
         margin: 0;
       }
     }
 
     .login-body {
-      padding: 28px;
+      padding: 36px;
       background: #fff;
     }
   }

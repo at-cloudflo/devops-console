@@ -93,11 +93,6 @@ import { MenuService } from '../../../core/menu/menu.service';
           </div>
         </div>
       </div>
-
-      <!-- Footer note -->
-      <p class="text-center mt-3" style="color:rgba(255,255,255,0.3);font-size:11px;">
-        For POC use only &nbsp;·&nbsp; Future: Microsoft Entra ID SSO
-      </p>
     </div>
   `
 })

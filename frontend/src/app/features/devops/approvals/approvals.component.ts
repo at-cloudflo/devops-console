@@ -1,17 +1,20 @@
-import { Component, inject } from '@angular/core';
+import { Component, inject, signal } from '@angular/core';
 import { CommonModule } from '@angular/common';
 import { FormsModule } from '@angular/forms';
 import { injectQuery } from '@tanstack/angular-query-experimental';
 import { DevopsApiService } from '../devops-api.service';
+import { RefreshIntervalService } from '../../../core/refresh/refresh-interval.service';
 import { PendingApproval } from '../../../models/devops.model';
 import { PageHeaderComponent } from '../../../shared/components/page-header/page-header.component';
 import { StatusBadgeComponent } from '../../../shared/components/status-badge/status-badge.component';
 import { LoadingSpinnerComponent } from '../../../shared/components/loading-spinner/loading-spinner.component';
+import { PaginatorComponent } from '../../../shared/components/paginator/paginator.component';
+import { LocalDatePipe } from '../../../shared/pipes/local-date.pipe';
 
 @Component({
   selector: 'app-approvals',
   standalone: true,
-  imports: [CommonModule, FormsModule, PageHeaderComponent, StatusBadgeComponent, LoadingSpinnerComponent],
+  imports: [CommonModule, FormsModule, PageHeaderComponent, StatusBadgeComponent, LoadingSpinnerComponent, PaginatorComponent, LocalDatePipe],
   template: `
     <app-page-header
       title="Pending Approvals"
@@ -32,14 +35,14 @@ import { LoadingSpinnerComponent } from '../../../shared/components/loading-spin
     <div class="filters-bar">
       <div class="input-group input-group-sm" style="max-width:220px">
         <span class="input-group-text"><i class="bi bi-search"></i></span>
-        <input type="text" class="form-control" placeholder="Search..." [(ngModel)]="searchTerm" />
+        <input type="text" class="form-control" placeholder="Search..." [(ngModel)]="searchTerm" (ngModelChange)="onFilterChange()" />
       </div>
-      <select class="form-select form-select-sm" style="max-width:160px" [(ngModel)]="projectFilter">
+      <select class="form-select form-select-sm" style="max-width:160px" [(ngModel)]="projectFilter" (ngModelChange)="onFilterChange()">
         <option value="">All Projects</option>
         @for (p of uniqueProjects(); track p) { <option [value]="p">{{ p }}</option> }
       </select>
       <div class="ms-auto" style="font-size:12px;color:var(--dc-text-muted)">
-        {{ filtered().length }} pending
+        {{ approvalsQuery.data()?.total ?? 0 }} pending
       </div>
     </div>
 
@@ -94,7 +97,7 @@ import { LoadingSpinnerComponent } from '../../../shared/components/loading-spin
                       <span [class.text-danger]="approval.ageMinutes > 1440" [class.text-warning]="approval.ageMinutes > 120 && approval.ageMinutes <= 1440" class="fw-500">
                         <i class="bi bi-clock me-1"></i>{{ formatAge(approval.ageMinutes) }}
                       </span>
-                      <div class="text-muted mt-1">since {{ formatDate(approval.waitingSince) }}</div>
+                      <div class="text-muted mt-1">since {{ approval.waitingSince | localDate }}</div>
                     </div>
                     <div class="d-flex gap-2 mt-1">
                       <button class="btn btn-sm btn-success" disabled title="POC: Not yet implemented">
@@ -111,6 +114,17 @@ import { LoadingSpinnerComponent } from '../../../shared/components/loading-spin
             </div>
           }
         </div>
+
+        @if (approvalsQuery.data(); as resp) {
+          <app-paginator
+            [page]="page()"
+            [pageSize]="pageSize()"
+            [total]="resp.total"
+            [totalPages]="resp.totalPages"
+            (pageChange)="page.set($event)"
+            (pageSizeChange)="pageSize.set($event)"
+          ></app-paginator>
+        }
       }
     }
   `,
@@ -118,24 +132,30 @@ import { LoadingSpinnerComponent } from '../../../shared/components/loading-spin
 })
 export class ApprovalsComponent {
   private readonly devopsApi = inject(DevopsApiService);
+  private readonly refreshIntervalSvc = inject(RefreshIntervalService);
   searchTerm = '';
   projectFilter = '';
+  readonly page = signal(1);
+  readonly pageSize = signal(25);
 
   readonly approvalsQuery = injectQuery(() => ({
-    queryKey: ['devops', 'approvals'],
-    queryFn: () => this.devopsApi.getApprovals(),
+    queryKey: ['devops', 'approvals', this.searchTerm, this.projectFilter, this.page(), this.pageSize()],
+    queryFn: () => this.devopsApi.getApprovals({
+      search: this.searchTerm || undefined,
+      project: this.projectFilter || undefined,
+      page: this.page(),
+      limit: this.pageSize(),
+    }),
     staleTime: 15_000,
-    refetchInterval: 30_000,
+    refetchInterval: this.refreshIntervalSvc.interval(),
   }));
 
+  onFilterChange(): void {
+    this.page.set(1);
+  }
+
   filtered(): PendingApproval[] {
-    let items = (this.approvalsQuery.data()?.data ?? []).filter((a) => a.status === 'pending');
-    if (this.searchTerm) {
-      const q = this.searchTerm.toLowerCase();
-      items = items.filter((a) => a.pipelineName.toLowerCase().includes(q) || a.project.toLowerCase().includes(q));
-    }
-    if (this.projectFilter) items = items.filter((a) => a.project === this.projectFilter);
-    return items.sort((a, b) => b.ageMinutes - a.ageMinutes);
+    return this.approvalsQuery.data()?.data ?? [];
   }
 
   uniqueProjects(): string[] {
@@ -150,7 +170,4 @@ export class ApprovalsComponent {
     return `${Math.floor(h / 24)}d ${h % 24}h`;
   }
 
-  formatDate(iso: string): string {
-    return new Date(iso).toLocaleString();
-  }
 }

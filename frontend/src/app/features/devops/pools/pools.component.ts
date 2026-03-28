@@ -4,15 +4,18 @@ import { RouterModule } from '@angular/router';
 import { FormsModule } from '@angular/forms';
 import { injectQuery } from '@tanstack/angular-query-experimental';
 import { DevopsApiService } from '../devops-api.service';
+import { RefreshIntervalService } from '../../../core/refresh/refresh-interval.service';
 import { PoolSummary } from '../../../models/devops.model';
 import { PageHeaderComponent } from '../../../shared/components/page-header/page-header.component';
 import { StatusBadgeComponent } from '../../../shared/components/status-badge/status-badge.component';
 import { LoadingSpinnerComponent } from '../../../shared/components/loading-spinner/loading-spinner.component';
+import { PaginatorComponent } from '../../../shared/components/paginator/paginator.component';
+import { LocalDatePipe } from '../../../shared/pipes/local-date.pipe';
 
 @Component({
   selector: 'app-pools',
   standalone: true,
-  imports: [CommonModule, RouterModule, FormsModule, PageHeaderComponent, StatusBadgeComponent, LoadingSpinnerComponent],
+  imports: [CommonModule, RouterModule, FormsModule, PageHeaderComponent, StatusBadgeComponent, LoadingSpinnerComponent, PaginatorComponent, LocalDatePipe],
   template: `
     <app-page-header
       title="Agent Pools"
@@ -28,9 +31,9 @@ import { LoadingSpinnerComponent } from '../../../shared/components/loading-spin
       <div class="d-flex align-items-center gap-2 flex-wrap" style="flex:1">
         <div class="input-group input-group-sm" style="max-width:220px">
           <span class="input-group-text"><i class="bi bi-search"></i></span>
-          <input type="text" class="form-control" placeholder="Search pools..." [(ngModel)]="searchTerm" />
+          <input type="text" class="form-control" placeholder="Search pools..." [(ngModel)]="searchTerm" (ngModelChange)="onFilterChange()" />
         </div>
-        <select class="form-select form-select-sm" style="max-width:150px" [(ngModel)]="statusFilter">
+        <select class="form-select form-select-sm" style="max-width:150px" [(ngModel)]="statusFilter" (ngModelChange)="onFilterChange()">
           <option value="">All States</option>
           <option value="healthy">Healthy</option>
           <option value="warning">Warning</option>
@@ -53,7 +56,7 @@ import { LoadingSpinnerComponent } from '../../../shared/components/loading-spin
       <div class="error-state card card-body">
         <i class="bi bi-exclamation-triangle-fill"></i>
         <h5>Failed to load pools</h5>
-        <p>{{ poolsQuery.error()?.message }}</p>
+        <p>{{ poolsQuery.error().message }}</p>
         <button class="btn btn-sm btn-primary mt-2" (click)="refresh()">Retry</button>
       </div>
     } @else {
@@ -144,7 +147,7 @@ import { LoadingSpinnerComponent } from '../../../shared/components/loading-spin
                 </div>
                 <div class="card-footer d-flex justify-content-between align-items-center" style="background:transparent;border-top:1px solid var(--dc-card-border);padding:10px 16px">
                   <span style="font-size:11px;color:var(--dc-text-muted)">
-                    <i class="bi bi-clock me-1"></i>{{ formatTime(pool.lastRefresh) }}
+                    <i class="bi bi-clock me-1"></i>{{ pool.lastRefresh | localDate }}
                   </span>
                   <a [routerLink]="['/devops/agents']" [queryParams]="{poolId: pool.id}" class="btn btn-sm btn-outline-secondary" style="font-size:11px">
                     View Agents <i class="bi bi-arrow-right ms-1"></i>
@@ -190,13 +193,24 @@ import { LoadingSpinnerComponent } from '../../../shared/components/loading-spin
                       </div>
                     </td>
                     <td><app-status-badge [status]="pool.alertState"></app-status-badge></td>
-                    <td style="font-size:12px;color:var(--dc-text-muted)">{{ formatTime(pool.lastRefresh) }}</td>
+                    <td style="font-size:12px;color:var(--dc-text-muted)">{{ pool.lastRefresh | localDate }}</td>
                   </tr>
                 }
               </tbody>
             </table>
           </div>
         </div>
+      }
+
+      @if (poolsQuery.data(); as resp) {
+        <app-paginator
+          [page]="page()"
+          [pageSize]="pageSize()"
+          [total]="resp.total"
+          [totalPages]="resp.totalPages"
+          (pageChange)="page.set($event)"
+          (pageSizeChange)="pageSize.set($event)"
+        ></app-paginator>
       }
     }
   `,
@@ -208,43 +222,44 @@ import { LoadingSpinnerComponent } from '../../../shared/components/loading-spin
 })
 export class PoolsComponent {
   private readonly devopsApi = inject(DevopsApiService);
+  private readonly refreshIntervalSvc = inject(RefreshIntervalService);
   readonly viewMode = signal<'grid' | 'table'>('grid');
   readonly lastRefresh = signal<string | null>(null);
+  readonly page = signal(1);
+  readonly pageSize = signal(25);
   searchTerm = '';
   statusFilter = '';
 
   readonly poolsQuery = injectQuery(() => ({
-    queryKey: ['devops', 'pools'],
+    queryKey: ['devops', 'pools', this.searchTerm, this.statusFilter, this.page(), this.pageSize()],
     queryFn: async () => {
-      const result = await this.devopsApi.getPools();
+      const result = await this.devopsApi.getPools({
+        search: this.searchTerm || undefined,
+        alertState: this.statusFilter || undefined,
+        page: this.page(),
+        limit: this.pageSize(),
+      });
       this.lastRefresh.set(new Date().toLocaleTimeString());
       return result;
     },
     staleTime: 30_000,
-    refetchInterval: 60_000,
+    refetchInterval: this.refreshIntervalSvc.interval(),
   }));
 
   refresh(): void {
     void this.poolsQuery.refetch();
   }
 
+  onFilterChange(): void {
+    this.page.set(1);
+  }
+
   filtered(): PoolSummary[] {
-    let pools = this.poolsQuery.data()?.data ?? [];
-    if (this.searchTerm) {
-      const q = this.searchTerm.toLowerCase();
-      pools = pools.filter((p) => p.name.toLowerCase().includes(q) || p.organization.toLowerCase().includes(q));
-    }
-    if (this.statusFilter) {
-      pools = pools.filter((p) => p.alertState === this.statusFilter);
-    }
-    return pools;
+    return this.poolsQuery.data()?.data ?? [];
   }
 
   countByState(pools: PoolSummary[], state: string): number {
     return pools.filter((p) => p.alertState === state).length;
   }
 
-  formatTime(iso: string): string {
-    return new Date(iso).toLocaleString();
-  }
 }

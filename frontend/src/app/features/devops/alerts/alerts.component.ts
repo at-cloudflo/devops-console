@@ -3,15 +3,19 @@ import { CommonModule } from '@angular/common';
 import { FormsModule } from '@angular/forms';
 import { injectQuery } from '@tanstack/angular-query-experimental';
 import { DevopsApiService } from '../devops-api.service';
+import { RefreshIntervalService } from '../../../core/refresh/refresh-interval.service';
 import { Alert, AlertSeverity, AlertStatus } from '../../../models/devops.model';
 import { PageHeaderComponent } from '../../../shared/components/page-header/page-header.component';
 import { StatusBadgeComponent } from '../../../shared/components/status-badge/status-badge.component';
 import { LoadingSpinnerComponent } from '../../../shared/components/loading-spinner/loading-spinner.component';
+import { PaginatorComponent } from '../../../shared/components/paginator/paginator.component';
+import { RelativeTimePipe } from '../../../shared/pipes/relative-time.pipe';
+import { LocalDatePipe } from '../../../shared/pipes/local-date.pipe';
 
 @Component({
   selector: 'app-alerts',
   standalone: true,
-  imports: [CommonModule, FormsModule, PageHeaderComponent, StatusBadgeComponent, LoadingSpinnerComponent],
+  imports: [CommonModule, FormsModule, PageHeaderComponent, StatusBadgeComponent, LoadingSpinnerComponent, PaginatorComponent, RelativeTimePipe, LocalDatePipe],
   template: `
     <app-page-header
       title="Alerts"
@@ -54,22 +58,22 @@ import { LoadingSpinnerComponent } from '../../../shared/components/loading-spin
     <div class="filters-bar">
       <div class="input-group input-group-sm" style="max-width:220px">
         <span class="input-group-text"><i class="bi bi-search"></i></span>
-        <input type="text" class="form-control" placeholder="Search alerts..." [(ngModel)]="searchTerm" />
+        <input type="text" class="form-control" placeholder="Search alerts..." [(ngModel)]="searchTerm" (ngModelChange)="onFilterChange()" />
       </div>
-      <select class="form-select form-select-sm" style="max-width:150px" [(ngModel)]="severityFilter">
+      <select class="form-select form-select-sm" style="max-width:150px" [(ngModel)]="severityFilter" (ngModelChange)="onFilterChange()">
         <option value="">All Severities</option>
         <option value="critical">Critical</option>
         <option value="warning">Warning</option>
         <option value="info">Info</option>
       </select>
-      <select class="form-select form-select-sm" style="max-width:160px" [(ngModel)]="statusFilter">
+      <select class="form-select form-select-sm" style="max-width:160px" [(ngModel)]="statusFilter" (ngModelChange)="onFilterChange()">
         <option value="">All Statuses</option>
         <option value="open">Open</option>
         <option value="acknowledged">Acknowledged</option>
         <option value="resolved">Resolved</option>
       </select>
       <div class="ms-auto" style="font-size:12px;color:var(--dc-text-muted)">
-        {{ filtered().length }} alerts
+        {{ alertsQuery.data()?.total ?? 0 }} alerts
       </div>
     </div>
 
@@ -85,7 +89,7 @@ import { LoadingSpinnerComponent } from '../../../shared/components/loading-spin
       <div class="empty-state card card-body">
         <i class="bi bi-bell-slash"></i>
         <h5>No alerts found</h5>
-        <p>{{ allAlerts().length === 0 ? 'All systems are healthy.' : 'No alerts match the current filter.' }}</p>
+        <p>{{ (alertsQuery.data()?.total ?? 0) === 0 ? 'All systems are healthy.' : 'No alerts match the current filter.' }}</p>
       </div>
     } @else {
       <div class="d-flex flex-column gap-2">
@@ -113,7 +117,7 @@ import { LoadingSpinnerComponent } from '../../../shared/components/loading-spin
                     <div class="d-flex flex-wrap gap-3" style="font-size:12px;color:var(--dc-text-muted)">
                       <span><i class="bi bi-tag me-1"></i>{{ humanizeType(alert.type) }}</span>
                       <span><i class="bi bi-hdd-stack me-1"></i>{{ alert.source }}</span>
-                      <span><i class="bi bi-clock me-1"></i>{{ formatRelativeTime(alert.startedAt) }}</span>
+                      <span><i class="bi bi-clock me-1"></i>{{ alert.startedAt | relativeTime }}</span>
                       @if (alert.acknowledged && alert.acknowledgedBy) {
                         <span class="text-success"><i class="bi bi-check me-1"></i>Acknowledged by {{ alert.acknowledgedBy }}</span>
                       }
@@ -157,10 +161,10 @@ import { LoadingSpinnerComponent } from '../../../shared/components/loading-spin
                         <div><span class="text-muted">Alert ID:</span> <span class="font-mono ms-2">{{ alert.id }}</span></div>
                         <div><span class="text-muted">Source ID:</span> <span class="font-mono ms-2">{{ alert.sourceId }}</span></div>
                         <div><span class="text-muted">Type:</span> <span class="ms-2">{{ humanizeType(alert.type) }}</span></div>
-                        <div><span class="text-muted">Started at:</span> <span class="ms-2">{{ formatDate(alert.startedAt) }}</span></div>
-                        <div><span class="text-muted">Updated at:</span> <span class="ms-2">{{ formatDate(alert.updatedAt) }}</span></div>
+                        <div><span class="text-muted">Started at:</span> <span class="ms-2">{{ alert.startedAt | localDate }}</span></div>
+                        <div><span class="text-muted">Updated at:</span> <span class="ms-2">{{ alert.updatedAt | localDate }}</span></div>
                         @if (alert.resolvedAt) {
-                          <div><span class="text-muted">Resolved at:</span> <span class="ms-2 text-success">{{ formatDate(alert.resolvedAt) }}</span></div>
+                          <div><span class="text-muted">Resolved at:</span> <span class="ms-2 text-success">{{ alert.resolvedAt | localDate }}</span></div>
                         }
                       </div>
                     </div>
@@ -184,6 +188,17 @@ import { LoadingSpinnerComponent } from '../../../shared/components/loading-spin
           </div>
         }
       </div>
+
+      @if (alertsQuery.data(); as resp) {
+        <app-paginator
+          [page]="page()"
+          [pageSize]="pageSize()"
+          [total]="resp.total"
+          [totalPages]="resp.totalPages"
+          (pageChange)="page.set($event)"
+          (pageSizeChange)="pageSize.set($event)"
+        ></app-paginator>
+      }
     }
   `,
   styles: [`
@@ -202,44 +217,35 @@ import { LoadingSpinnerComponent } from '../../../shared/components/loading-spin
 })
 export class AlertsComponent {
   private readonly devopsApi = inject(DevopsApiService);
+  private readonly refreshIntervalSvc = inject(RefreshIntervalService);
   readonly acknowledging = signal<string | null>(null);
   private readonly expandedSet = signal(new Set<string>());
 
   searchTerm = '';
   severityFilter = '';
   statusFilter = '';
+  readonly page = signal(1);
+  readonly pageSize = signal(25);
 
   readonly alertsQuery = injectQuery(() => ({
-    queryKey: ['devops', 'alerts'],
-    queryFn: () => this.devopsApi.getAlerts(),
+    queryKey: ['devops', 'alerts', this.searchTerm, this.severityFilter, this.statusFilter, this.page(), this.pageSize()],
+    queryFn: () => this.devopsApi.getAlerts({
+      search: this.searchTerm || undefined,
+      severity: this.severityFilter || undefined,
+      status: this.statusFilter as AlertStatus | undefined || undefined,
+      page: this.page(),
+      limit: this.pageSize(),
+    }),
     staleTime: 30_000,
-    refetchInterval: 60_000,
+    refetchInterval: this.refreshIntervalSvc.interval(),
   }));
 
-  allAlerts(): Alert[] {
-    return this.alertsQuery.data()?.data ?? [];
+  onFilterChange(): void {
+    this.page.set(1);
   }
 
   filtered(): Alert[] {
-    let alerts = this.allAlerts();
-    if (this.searchTerm) {
-      const q = this.searchTerm.toLowerCase();
-      alerts = alerts.filter((a) =>
-        a.message.toLowerCase().includes(q) ||
-        a.source.toLowerCase().includes(q) ||
-        a.type.toLowerCase().includes(q)
-      );
-    }
-    if (this.severityFilter) alerts = alerts.filter((a) => a.severity === this.severityFilter);
-    if (this.statusFilter) alerts = alerts.filter((a) => a.status === this.statusFilter);
-    // Sort: open + critical first
-    return alerts.sort((a, b) => {
-      const statusOrder: Record<AlertStatus, number> = { open: 0, acknowledged: 1, resolved: 2 };
-      const sevOrder: Record<AlertSeverity, number> = { critical: 0, warning: 1, info: 2 };
-      const so = (statusOrder[a.status] ?? 9) - (statusOrder[b.status] ?? 9);
-      if (so !== 0) return so;
-      return (sevOrder[a.severity] ?? 9) - (sevOrder[b.severity] ?? 9);
-    });
+    return this.alertsQuery.data()?.data ?? [];
   }
 
   countBySeverity(alerts: Alert[], sev: AlertSeverity): number {
@@ -281,20 +287,6 @@ export class AlertsComponent {
 
   capitalize(s: string): string {
     return s.charAt(0).toUpperCase() + s.slice(1);
-  }
-
-  formatRelativeTime(iso: string): string {
-    const diff = Date.now() - new Date(iso).getTime();
-    const m = Math.floor(diff / 60000);
-    if (m < 1) return 'Just now';
-    if (m < 60) return `${m}m ago`;
-    const h = Math.floor(m / 60);
-    if (h < 24) return `${h}h ago`;
-    return `${Math.floor(h / 24)}d ago`;
-  }
-
-  formatDate(iso: string): string {
-    return new Date(iso).toLocaleString();
   }
 
   objectKeys(obj: Record<string, unknown>): string[] {

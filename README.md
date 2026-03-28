@@ -17,10 +17,11 @@ An enterprise-grade Internal Developer Portal (IDP) POC providing a unified oper
 9. [Data Flow](#9-data-flow)
 10. [Optimization Strategy](#10-optimization-strategy)
 11. [Local Development](#11-local-development)
-12. [API Overview](#12-api-overview)
-13. [Future Roadmap](#13-future-roadmap)
-14. [Tradeoffs & Design Decisions](#14-tradeoffs--design-decisions)
-15. [Screens Reference](#15-screens-reference)
+12. [Cloud Run Deployment](#12-cloud-run-deployment)
+13. [API Overview](#13-api-overview)
+14. [Future Roadmap](#14-future-roadmap)
+15. [Tradeoffs & Design Decisions](#15-tradeoffs--design-decisions)
+16. [Screens Reference](#16-screens-reference)
 
 ---
 
@@ -73,8 +74,8 @@ An enterprise-grade Internal Developer Portal (IDP) POC providing a unified oper
 | Azure DevOps API calls | `mock-azure-devops.adapter.ts` → swap adapter for live REST calls |
 | Vertex AI API calls | `mock-vertex-ai.adapter.ts` → swap adapter for Vertex Pipelines REST API |
 | Microsoft Entra ID login | Hardcoded users in `mock-users.json` → MSAL OAuth2 flow |
-| Redis cache/session | In-memory `Map` stores → Redis with `ioredis` |
-| Database config persistence | JSON file → PostgreSQL or MongoDB |
+| Redis cache/session | In-memory `Map` stores → Cloud Memorystore (Redis) with `ioredis` |
+| Config persistence | JSON file → Firestore (single document) or Cloud Storage (JSON blob) |
 | Approval actions | Read-only with placeholder buttons |
 | Log / artifact links | Static labels (not linked to real GCS/Cloud Logging) |
 
@@ -218,6 +219,25 @@ devops-console/
 ├── .gitignore
 ├── .env.example                  # Root env template
 ├── docker-compose.yml            # Local orchestration
+│
+├── .azure-pipelines/
+│   ├── backend.yml               # CI/CD — triggers on backend/** changes
+│   ├── frontend.yml              # CI/CD — triggers on frontend/** changes
+│   └── terraform.yml             # Plan/Apply — triggers on terraform/** changes
+│
+├── terraform/
+│   ├── versions.tf               # Provider google ~> 6.0, Terraform >= 1.9
+│   ├── variables.tf              # project_id, region, env, images, secrets
+│   ├── locals.tf                 # Name prefixes (respects GCP char limits)
+│   ├── apis.tf                   # Enables required GCP APIs
+│   ├── networking.tf             # VPC, subnet, VPC Access Connector
+│   ├── artifact_registry.tf      # Docker image registry
+│   ├── redis.tf                  # Cloud Memorystore BASIC 1 GB (sessions + cache)
+│   ├── secrets.tf                # SESSION_SECRET in Secret Manager
+│   ├── iam.tf                    # Backend service account + invoker bindings
+│   ├── cloud_run.tf              # Backend + frontend Cloud Run services
+│   ├── outputs.tf                # Frontend URL, backend URL, registry path
+│   └── terraform.tfvars.example  # Copy to terraform.tfvars and fill in values
 │
 ├── backend/
 │   ├── .env.example
@@ -373,7 +393,7 @@ The frontend `AuthService` only calls `/api/auth/me` — it does not care how th
 | `--dc-primary-subtle` | `#f5e6ee` | Icon backgrounds, badges |
 | `--dc-page-bg` | `#f4f6fb` (light) / `#0f1117` (dark) | Page background |
 | `--dc-card-bg` | `#ffffff` (light) / `#1a1d2e` (dark) | Card backgrounds |
-| `--dc-sidebar-bg` | `#1e2139` | Sidebar (always dark) |
+| `--dc-sidebar-bg` | `#8e2157` | Sidebar (always dark) |
 
 ### Theming
 
@@ -663,7 +683,143 @@ export const environment = {
 
 ---
 
-## 12. API Overview
+## 12. Cloud Run Deployment
+
+The app runs as two Cloud Run services (frontend + backend) backed by Cloud Memorystore Redis. All infrastructure is managed by Terraform.
+
+### Infrastructure Overview
+
+```
+Artifact Registry          — stores backend and frontend Docker images
+Cloud Run — backend        — Node.js/Express API, VPC-connected to Redis
+Cloud Run — frontend       — nginx serving the pre-built Angular SPA,
+                             proxies /api/* to the backend service
+Cloud Memorystore (Redis)  — sessions + in-memory cache (replaces in-memory store)
+VPC + VPC Access Connector — private network route from Cloud Run to Redis
+Secret Manager             — SESSION_SECRET (never stored in plain env vars)
+```
+
+### Prerequisites
+
+- [Terraform](https://developer.hashicorp.com/terraform/install) >= 1.9
+- [gcloud CLI](https://cloud.google.com/sdk/docs/install) authenticated (`gcloud auth application-default login`)
+- Docker (for building images)
+- A GCP project with billing enabled
+
+### Step 1 — Build and push images
+
+```bash
+# Authenticate Docker to Artifact Registry
+gcloud auth configure-docker REGION-docker.pkg.dev
+
+# Build images
+docker build -t REGION-docker.pkg.dev/PROJECT_ID/devops-console/backend:latest  ./backend
+docker build -t REGION-docker.pkg.dev/PROJECT_ID/devops-console/frontend:latest ./frontend
+
+# Push (Artifact Registry must exist first — created by terraform apply in step 3)
+# Run terraform apply once before pushing, or create the repo manually:
+# gcloud artifacts repositories create devops-console --repository-format=docker --location=REGION
+docker push REGION-docker.pkg.dev/PROJECT_ID/devops-console/backend:latest
+docker push REGION-docker.pkg.dev/PROJECT_ID/devops-console/frontend:latest
+```
+
+### Step 2 — Configure Terraform
+
+```bash
+cd terraform
+cp terraform.tfvars.example terraform.tfvars
+```
+
+Edit `terraform.tfvars`:
+
+```hcl
+project_id = "your-gcp-project-id"
+region     = "us-central1"
+env        = "dev"
+
+backend_image  = "us-central1-docker.pkg.dev/your-gcp-project-id/devops-console/backend:latest"
+frontend_image = "us-central1-docker.pkg.dev/your-gcp-project-id/devops-console/frontend:latest"
+
+# Generate with: openssl rand -base64 32
+session_secret = "your-32-plus-char-random-secret"
+
+# Leave empty on first apply (see Step 4)
+allowed_origins = ""
+```
+
+### Step 3 — First apply
+
+```bash
+cd terraform
+terraform init
+terraform apply
+```
+
+This creates all infrastructure. Note the outputs:
+
+```
+frontend_url          = "https://devops-console-dev-ui-xxxx.run.app"
+backend_url           = "https://devops-console-dev-api-xxxx.run.app"
+artifact_registry_url = "us-central1-docker.pkg.dev/your-project/devops-console"
+redis_host            = "10.x.x.x"
+```
+
+### Step 4 — Fix CORS (second apply)
+
+The backend's `ALLOWED_ORIGINS` cannot be set until the frontend URL is known. After the first apply, copy `frontend_url` from the outputs and re-apply:
+
+```bash
+# In terraform.tfvars, set:
+allowed_origins = "https://devops-console-dev-ui-xxxx.run.app"
+
+terraform apply   # Only the backend Cloud Run service is updated
+```
+
+The app is now fully deployed.
+
+### Resources created
+
+| Resource | Name pattern | Purpose |
+|---|---|---|
+| VPC | `devops-console-{env}-vpc` | Private network for Redis |
+| VPC Access Connector | `dc-{env}-conn` | Cloud Run → Redis route |
+| Artifact Registry | `devops-console` | Docker image storage |
+| Cloud Memorystore | `devops-console-{env}-redis` | Sessions + cache |
+| Secret Manager secret | `devops-console-{env}-session-secret` | `SESSION_SECRET` |
+| Service account | `dc-{env}-backend` | Backend Cloud Run identity |
+| Cloud Run service | `devops-console-{env}-api` | Backend |
+| Cloud Run service | `devops-console-{env}-ui` | Frontend |
+
+### Tearing down
+
+```bash
+cd terraform
+terraform destroy
+```
+
+### CI/CD via Azure DevOps Pipelines
+
+Each component has a dedicated pipeline in `.azure-pipelines/` that triggers only when its folder changes:
+
+| Pipeline | Trigger path | CI | CD |
+|---|---|---|---|
+| `backend.yml` | `backend/**` | lint, tsc build | docker build+push, `gcloud run deploy` |
+| `frontend.yml` | `frontend/**` | lint, ng build:prod | docker build+push, `gcloud run deploy` |
+| `terraform.yml` | `terraform/**` | init, validate, plan | apply (requires environment approval) |
+
+See `.azure-pipelines/` for setup instructions including required variable groups.
+
+### Production hardening (beyond POC)
+
+- Replace `allUsers` invoker binding on the backend with the frontend service account only, and set `ingress = INGRESS_TRAFFIC_INTERNAL_ONLY` on the backend
+- Enable Cloud IAP on the frontend for org-only access
+- Wire `REDIS_HOST` / `REDIS_PORT` into `express-session` using `connect-redis` + `ioredis`
+- Replace JSON file config store with Firestore (single document) or Cloud Storage
+- Add a Cloud Build or GitHub Actions pipeline to automate image builds on push
+
+---
+
+## 13. API Overview
 
 All endpoints are prefixed with `/api/`.
 
@@ -766,7 +922,7 @@ All endpoints are prefixed with `/api/`.
 
 ---
 
-## 13. Future Roadmap
+## 14. Future Roadmap
 
 ### High Priority
 
@@ -788,9 +944,9 @@ All endpoints are prefixed with `/api/`.
 ### Medium Priority
 
 - **Approval Actions** — Implement approve/reject via Azure DevOps Approvals API (already behind `featureFlags.enableApprovalActions`)
-- **Redis Cache + Session Store** — Replace `Map`-based cache and in-memory session with Redis for horizontal scaling
+- **Redis Cache + Session Store** — Replace `Map`-based cache and in-memory session with Cloud Memorystore (Redis) using `connect-redis` + `ioredis`. Infrastructure already provisioned by Terraform — only application wiring remains.
+- **Firestore / GCS Config Store** — Replace JSON file persistence with Firestore (single document) or a Cloud Storage JSON blob. No SQL database required — this app owns no relational data.
 - **Alert Subscriptions** — Push alerts to Slack/Teams/PagerDuty via webhook
-- **PostgreSQL Config Store** — Replace JSON file with a database for multi-instance deployments
 - **Pagination** — Add cursor/page-based pagination to queue and jobs endpoints for large result sets
 
 ### Low Priority
@@ -803,15 +959,210 @@ All endpoints are prefixed with `/api/`.
 
 ---
 
-## 14. Tradeoffs & Design Decisions
+## 15. Migrating from Mock to Live APIs
+
+The POC uses static JSON fixtures and hardcoded users. Every integration point is isolated to a single file — no frontend changes are needed for any of these migrations.
+
+### Step 1 — Authentication (Entra ID)
+
+**File to change:** `backend/src/auth/auth.service.ts` + `backend/src/data/mock-users.json`
+
+1. Register an Azure AD application in your tenant (Entra ID → App registrations).
+2. Add redirect URI: `https://<your-frontend-url>/auth/callback`.
+3. In your app registration, expose an API scope and add a `groups` claim under **Token configuration**.
+4. Install MSAL: `npm install @azure/msal-node` (backend) and `@azure/msal-browser` (frontend).
+5. Replace the `mock-users.json` lookup in `AuthService.validateUser()` with MSAL token validation.
+6. Map the `groups` claim through the existing `resolveRoles()` function — this function does **not** change.
+7. Set the following environment variables (or Secret Manager entries):
+   ```
+   ENTRA_TENANT_ID=<tenant-id>
+   ENTRA_CLIENT_ID=<client-id>
+   ENTRA_CLIENT_SECRET=<client-secret>
+   ```
+
+### Step 2 — Azure DevOps Integration
+
+**File to change:** `backend/src/adapters/azure-devops.adapter.ts`
+
+The adapter already implements a typed interface consumed by `DevopsService`. Replace the mock JSON reads with real HTTP calls — the service and controller layers are untouched.
+
+```typescript
+// Before (POC)
+import pools from '../data/mock-pools.json';
+return pools;
+
+// After (production)
+const response = await fetch(
+  `https://dev.azure.com/${org}/_apis/distributedtask/pools?api-version=7.1`,
+  { headers: { Authorization: `Basic ${btoa(':' + PAT)}` } }
+);
+return response.json();
+```
+
+Set these environment variables:
+```
+ADO_ORG=<your-org>
+ADO_PAT=<personal-access-token>   # or use service principal OAuth2
+```
+
+The PAT requires these scopes: `Agent Pools (Read)`, `Build (Read)`, `Release (Read & execute)`, `Environment (Read & manage)`.
+
+### Step 3 — Vertex AI Integration
+
+**File to change:** `backend/src/adapters/vertex-ai.adapter.ts`
+
+Same pattern as Azure DevOps — replace mock JSON reads with Vertex Pipelines REST API calls.
+
+```typescript
+// After (production)
+const { GoogleAuth } = require('google-auth-library');
+const auth = new GoogleAuth({ scopes: 'https://www.googleapis.com/auth/cloud-platform' });
+const client = await auth.getClient();
+const url = `https://${region}-aiplatform.googleapis.com/v1/projects/${project}/locations/${region}/pipelineJobs`;
+const res = await client.request({ url });
+return res.data.pipelineJobs;
+```
+
+Set these environment variables:
+```
+GCP_PROJECT_ID=<project-id>
+GCP_REGION=<region>               # e.g. us-central1
+```
+
+Authentication on Cloud Run uses Workload Identity automatically — no key file needed.
+
+### Step 4 — Session Store (Redis)
+
+**File to change:** `backend/src/app.ts`
+
+Redis infrastructure is already provisioned by Terraform (`terraform/redis.tf`). Only application wiring remains:
+
+```bash
+npm install connect-redis ioredis
+```
+
+```typescript
+// Replace MemoryStore with RedisStore
+import { createClient } from 'redis';
+import RedisStore from 'connect-redis';
+const redisClient = createClient({ url: process.env.REDIS_URL });
+app.use(session({ store: new RedisStore({ client: redisClient }), ... }));
+```
+
+Set: `REDIS_URL=redis://<memorystore-ip>:6379`
+
+### Step 5 — Config Persistence (Firestore or GCS)
+
+**File to change:** `backend/src/services/config.service.ts`
+
+Replace the JSON file read/write with a Firestore document or GCS blob. The service interface does not change — only the storage backend.
+
+### Migration Checklist
+
+| Item | File | Effort |
+|---|---|---|
+| Entra ID auth | `auth.service.ts` + `mock-users.json` | M |
+| Azure DevOps adapter | `azure-devops.adapter.ts` | M |
+| Vertex AI adapter | `vertex-ai.adapter.ts` | M |
+| Redis session store | `app.ts` | S |
+| Config persistence | `config.service.ts` | S |
+| Approval actions | `approvals.controller.ts` | M |
+| Alert webhooks | new `webhook.service.ts` | L |
+
+> Effort: S = < 1 day, M = 1–3 days, L = 3+ days
+
+---
+
+## 16. Teams Notifications
+
+The alert engine can post Adaptive Card messages to a Microsoft Teams channel whenever an alert fires, escalates, or resolves. Everything is configured through the app's **Config** page — no redeploy required.
+
+### How It Works
+
+```
+Alert engine (every 30 s)
+  └─ upsertAlert()  ──► fireNotification()  ──► sendTeamsAlert()  ──► Teams Incoming Webhook
+        new alert                                Adaptive Card              Teams channel
+        severity escalation
+        resolved (optional)
+```
+
+Notifications are **fire-and-forget**: a webhook delivery failure is logged but never blocks the alert polling cycle.
+
+### Step 1 — Create the Incoming Webhook in Teams
+
+1. Open the Teams channel you want to receive alerts.
+2. Click **···** (More options) → **Manage channel** → **Connectors**.
+3. Find **Incoming Webhook** → **Add** → **Add** again → give it a name (e.g. `DevOps Console Alerts`) → optionally upload an icon → **Create**.
+4. Copy the generated webhook URL — it looks like:
+   ```
+   https://contoso.webhook.office.com/webhookb2/xxxxxxxx-xxxx-xxxx-xxxx-xxxxxxxxxxxx@.../IncomingWebhook/...
+   ```
+5. Click **Done**.
+
+> **Note:** In newer Teams tenants the Connectors UI has moved to **Settings → Apps → Manage your apps → Incoming Webhook**. If you can't find Connectors, search for "Incoming Webhook" in the Teams app store and add it to the channel.
+
+### Step 2 — Configure in the App
+
+1. Navigate to **Config** (sidebar → ⚙ Configuration).
+2. Scroll to the **Teams Notifications** card.
+3. Paste the webhook URL into the **Incoming Webhook URL** field.
+4. Choose your settings:
+
+| Setting | Description | Default |
+|---|---|---|
+| **Enabled** | Master on/off toggle | Off |
+| **Minimum Severity** | `Info and above` / `Warning and above` / `Critical only` | Warning |
+| **New alert** | Notify when an alert fires for the first time | On |
+| **Escalation** | Notify when an alert goes from warning → critical | On |
+| **Resolved** | Notify when an alert clears | Off |
+
+5. Click **Send Test Message** to verify delivery before saving.
+6. Toggle **Enabled** to on and click **Save Changes**.
+
+### What a Notification Looks Like
+
+Each message is an **Adaptive Card** with colour-coded severity:
+
+| Severity | Colour | Emoji |
+|---|---|---|
+| Critical | 🔴 Red | 🔴 |
+| Warning | 🟡 Yellow | 🟡 |
+| Info | 🔵 Blue | 🔵 |
+| Resolved | ✅ Green | ✅ |
+
+The card includes the alert type, source, message, timestamp, and any relevant context (e.g. pool health %, offline duration, queue wait time).
+
+### Fallback — Environment Variable
+
+If you prefer not to store the webhook URL in the config JSON (e.g. for secrets management), set it as an environment variable. The app uses this as a fallback when `teamsNotifications.webhookUrl` in the config is empty:
+
+```env
+TEAMS_WEBHOOK_URL=https://contoso.webhook.office.com/webhookb2/...
+```
+
+The `enabled`, `minSeverity`, and event toggles in the Config page still apply even when using the env var.
+
+### Changing the Channel
+
+To route alerts to a different channel (e.g. a separate channel for critical-only):
+
+1. Create a second Incoming Webhook in the new channel.
+2. Go to Config → paste the new URL → Save.
+
+Multi-channel routing (e.g. critical → ops channel, warning → dev channel) is not yet implemented but can be added by extending `TeamsNotificationsConfig` with an array of webhook targets.
+
+---
+
+## 17. Tradeoffs & Design Decisions
 
 ### POC Simplifications
 
 | Decision | POC Choice | Production Alternative |
 |---|---|---|
-| Session store | express-session in-memory | Redis with `connect-redis` |
-| Config persistence | JSON file | PostgreSQL / MongoDB |
-| Cache | In-memory `Map` | Redis with pub/sub invalidation |
+| Session store | express-session in-memory | Cloud Memorystore (Redis) with `connect-redis` |
+| Config persistence | JSON file | Firestore (1 document) or Cloud Storage (JSON blob) — no SQL DB needed |
+| Cache | In-memory `Map` | Cloud Memorystore (Redis) — same instance as session store |
 | Adapter | Static mock JSON | Live REST API with retry/backoff |
 | Auth | Hardcoded users | MSAL + Entra ID |
 | Background jobs | `setInterval` | Bull queue / Cloud Scheduler |
@@ -842,7 +1193,7 @@ The project avoids packages that require network access to external CDNs or have
 
 ---
 
-## 15. Screens Reference
+## 18. Screens Reference
 
 | Route | Screen |
 |---|---|

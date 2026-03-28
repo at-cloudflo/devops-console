@@ -4,15 +4,18 @@ import { FormsModule } from '@angular/forms';
 import { ActivatedRoute } from '@angular/router';
 import { injectQuery } from '@tanstack/angular-query-experimental';
 import { DevopsApiService } from '../devops-api.service';
+import { RefreshIntervalService } from '../../../core/refresh/refresh-interval.service';
 import { AgentDetail } from '../../../models/devops.model';
 import { PageHeaderComponent } from '../../../shared/components/page-header/page-header.component';
 import { StatusBadgeComponent } from '../../../shared/components/status-badge/status-badge.component';
 import { LoadingSpinnerComponent } from '../../../shared/components/loading-spinner/loading-spinner.component';
+import { PaginatorComponent } from '../../../shared/components/paginator/paginator.component';
+import { RelativeTimePipe } from '../../../shared/pipes/relative-time.pipe';
 
 @Component({
   selector: 'app-agents',
   standalone: true,
-  imports: [CommonModule, FormsModule, PageHeaderComponent, StatusBadgeComponent, LoadingSpinnerComponent],
+  imports: [CommonModule, FormsModule, PageHeaderComponent, StatusBadgeComponent, LoadingSpinnerComponent, PaginatorComponent, RelativeTimePipe],
   template: `
     <app-page-header
       title="Agents"
@@ -25,23 +28,23 @@ import { LoadingSpinnerComponent } from '../../../shared/components/loading-spin
     <div class="filters-bar">
       <div class="input-group input-group-sm" style="max-width:220px">
         <span class="input-group-text"><i class="bi bi-search"></i></span>
-        <input type="text" class="form-control" placeholder="Search agents..." [(ngModel)]="searchTerm" />
+        <input type="text" class="form-control" placeholder="Search agents..." [(ngModel)]="searchTerm" (ngModelChange)="onFilterChange()" />
       </div>
-      <select class="form-select form-select-sm" style="max-width:160px" [(ngModel)]="statusFilter">
+      <select class="form-select form-select-sm" style="max-width:160px" [(ngModel)]="statusFilter" (ngModelChange)="onFilterChange()">
         <option value="">All Statuses</option>
         <option value="online">Online</option>
         <option value="offline">Offline</option>
         <option value="busy">Busy</option>
         <option value="disabled">Disabled</option>
       </select>
-      <select class="form-select form-select-sm" style="max-width:220px" [(ngModel)]="poolFilter">
+      <select class="form-select form-select-sm" style="max-width:220px" [(ngModel)]="poolFilter" (ngModelChange)="onFilterChange()">
         <option value="">All Pools</option>
         @for (pool of uniquePools(); track pool) {
           <option [value]="pool">{{ pool }}</option>
         }
       </select>
       <div class="ms-auto d-flex align-items-center gap-2" style="font-size:12px;color:var(--dc-text-muted)">
-        <span>{{ filtered().length }} agents</span>
+        <span>{{ agentsQuery.data()?.total ?? 0 }} agents</span>
         <span style="color:#ef4444">{{ offlineCount() }} offline</span>
       </div>
     </div>
@@ -106,7 +109,7 @@ import { LoadingSpinnerComponent } from '../../../shared/components/loading-spin
                     </div>
                   </td>
                   <td style="font-size:12px;color:var(--dc-text-muted)">
-                    {{ formatRelativeTime(agent.lastSeen) }}
+                    {{ agent.lastSeen | relativeTime }}
                   </td>
                   <td>
                     <button class="btn btn-sm btn-icon btn-outline-secondary" (click)="toggleExpanded(agent.id)" title="Details">
@@ -150,37 +153,52 @@ import { LoadingSpinnerComponent } from '../../../shared/components/loading-spin
             </tbody>
           </table>
         </div>
+        @if (agentsQuery.data(); as resp) {
+          <app-paginator
+            [page]="page()"
+            [pageSize]="pageSize()"
+            [total]="resp.total"
+            [totalPages]="resp.totalPages"
+            (pageChange)="page.set($event)"
+            (pageSizeChange)="pageSize.set($event)"
+          ></app-paginator>
+        }
       </div>
     }
   `
 })
 export class AgentsComponent {
   private readonly devopsApi = inject(DevopsApiService);
+  private readonly refreshIntervalSvc = inject(RefreshIntervalService);
   private readonly route = inject(ActivatedRoute);
 
   searchTerm = '';
   statusFilter = '';
   poolFilter = '';
+  readonly page = signal(1);
+  readonly pageSize = signal(25);
   private readonly expandedSet = signal(new Set<string>());
 
   readonly agentsQuery = injectQuery(() => ({
-    queryKey: ['devops', 'agents'],
-    queryFn: () => this.devopsApi.getAgents(),
+    queryKey: ['devops', 'agents', this.searchTerm, this.statusFilter, this.poolFilter, this.page(), this.pageSize()],
+    queryFn: () => this.devopsApi.getAgents({
+      search: this.searchTerm || undefined,
+      status: this.statusFilter || undefined,
+      pool: this.poolFilter || undefined,
+      poolId: this.route.snapshot.queryParamMap.get('poolId') ?? undefined,
+      page: this.page(),
+      limit: this.pageSize(),
+    }),
     staleTime: 30_000,
-    refetchInterval: 60_000,
+    refetchInterval: this.refreshIntervalSvc.interval(),
   }));
 
+  onFilterChange(): void {
+    this.page.set(1);
+  }
+
   filtered(): AgentDetail[] {
-    let agents = this.agentsQuery.data()?.data ?? [];
-    const poolIdFromRoute = this.route.snapshot.queryParamMap.get('poolId');
-    if (poolIdFromRoute) agents = agents.filter((a) => a.poolId === poolIdFromRoute);
-    if (this.searchTerm) {
-      const q = this.searchTerm.toLowerCase();
-      agents = agents.filter((a) => a.name.toLowerCase().includes(q) || a.poolName.toLowerCase().includes(q));
-    }
-    if (this.statusFilter) agents = agents.filter((a) => a.status === this.statusFilter);
-    if (this.poolFilter) agents = agents.filter((a) => a.poolName === this.poolFilter);
-    return agents;
+    return this.agentsQuery.data()?.data ?? [];
   }
 
   uniquePools(): string[] {
@@ -205,13 +223,4 @@ export class AgentsComponent {
     return os.split(' ').slice(0, 2).join(' ');
   }
 
-  formatRelativeTime(iso: string): string {
-    const diff = Date.now() - new Date(iso).getTime();
-    const m = Math.floor(diff / 60000);
-    if (m < 1) return 'Just now';
-    if (m < 60) return `${m}m ago`;
-    const h = Math.floor(m / 60);
-    if (h < 24) return `${h}h ago`;
-    return `${Math.floor(h / 24)}d ago`;
-  }
 }

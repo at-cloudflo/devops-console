@@ -23,4 +23,10 @@ export class ConfigApiService {
       this.api.post<{ success: boolean; data: SystemConfig }>('/config/reset')
     );
   }
+
+  testTeamsWebhook(webhookUrl: string): Promise<{ success: boolean }> {
+    return firstValueFrom(
+      this.api.post<{ success: boolean }>('/config/test-teams-webhook', { webhookUrl })
+    );
+  }
 }

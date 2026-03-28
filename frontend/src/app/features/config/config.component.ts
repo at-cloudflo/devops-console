@@ -4,7 +4,7 @@ import { FormsModule } from '@angular/forms';
 import { injectQuery } from '@tanstack/angular-query-experimental';
 import { firstValueFrom } from 'rxjs';
 import { ConfigApiService } from './config-api.service';
-import { SystemConfig, AlertThresholds, RefreshIntervals } from '../../models/config.model';
+import { SystemConfig, AlertThresholds, RefreshIntervals, TeamsNotificationsConfig } from '../../models/config.model';
 import { PageHeaderComponent } from '../../shared/components/page-header/page-header.component';
 import { LoadingSpinnerComponent } from '../../shared/components/loading-spinner/loading-spinner.component';
 
@@ -283,6 +283,114 @@ import { LoadingSpinnerComponent } from '../../shared/components/loading-spinner
           </div>
         </div>
 
+        <!-- Teams Notifications -->
+        <div class="col-12">
+          <div class="card">
+            <div class="card-header d-flex align-items-center justify-content-between">
+              <h6 class="mb-0"><i class="bi bi-chat-square-text-fill me-2 text-primary-brand"></i>Teams Notifications</h6>
+              <div class="form-check form-switch mb-0">
+                <input class="form-check-input" type="checkbox" id="teams-enabled"
+                  [(ngModel)]="cfg.teamsNotifications.enabled" />
+                <label class="form-check-label" for="teams-enabled" style="font-size:12px">
+                  {{ cfg.teamsNotifications.enabled ? 'Enabled' : 'Disabled' }}
+                </label>
+              </div>
+            </div>
+            <div class="card-body">
+              <div class="row g-3">
+
+                <!-- Webhook URL -->
+                <div class="col-12">
+                  <label class="form-label config-label">Incoming Webhook URL</label>
+                  <input
+                    type="url"
+                    class="form-control form-control-sm font-mono"
+                    [(ngModel)]="cfg.teamsNotifications.webhookUrl"
+                    placeholder="https://contoso.webhook.office.com/webhookb2/..."
+                    [class.is-invalid]="cfg.teamsNotifications.enabled && !cfg.teamsNotifications.webhookUrl"
+                  />
+                  @if (cfg.teamsNotifications.enabled && !cfg.teamsNotifications.webhookUrl) {
+                    <div class="invalid-feedback">Webhook URL is required when notifications are enabled.</div>
+                  } @else {
+                    <div class="form-text">
+                      Teams channel → <strong>Manage channel</strong> → <strong>Connectors</strong> → <strong>Incoming Webhook</strong> → Create → copy URL here.
+                    </div>
+                  }
+                </div>
+
+                <!-- Min severity + toggles -->
+                <div class="col-md-4">
+                  <label class="form-label config-label">Minimum Severity</label>
+                  <select class="form-select form-select-sm" [(ngModel)]="cfg.teamsNotifications.minSeverity">
+                    <option value="info">Info and above</option>
+                    <option value="warning">Warning and above</option>
+                    <option value="critical">Critical only</option>
+                  </select>
+                  <div class="form-text">Only alerts at this level or higher will be sent.</div>
+                </div>
+
+                <div class="col-md-8">
+                  <label class="form-label config-label">Notification Events</label>
+                  <div class="d-flex flex-column gap-2 mt-1">
+                    <div class="d-flex align-items-center gap-2">
+                      <div class="form-check form-switch mb-0">
+                        <input class="form-check-input" type="checkbox" id="teams-new"
+                          [(ngModel)]="cfg.teamsNotifications.notifyOnNew" />
+                      </div>
+                      <div>
+                        <label class="mb-0" for="teams-new" style="font-size:13px;font-weight:500;cursor:pointer">New alert</label>
+                        <div class="form-text">Send when an alert fires for the first time.</div>
+                      </div>
+                    </div>
+                    <div class="d-flex align-items-center gap-2">
+                      <div class="form-check form-switch mb-0">
+                        <input class="form-check-input" type="checkbox" id="teams-escalation"
+                          [(ngModel)]="cfg.teamsNotifications.notifyOnEscalation" />
+                      </div>
+                      <div>
+                        <label class="mb-0" for="teams-escalation" style="font-size:13px;font-weight:500;cursor:pointer">Escalation</label>
+                        <div class="form-text">Send when an alert escalates from warning to critical.</div>
+                      </div>
+                    </div>
+                    <div class="d-flex align-items-center gap-2">
+                      <div class="form-check form-switch mb-0">
+                        <input class="form-check-input" type="checkbox" id="teams-resolved"
+                          [(ngModel)]="cfg.teamsNotifications.notifyOnResolution" />
+                      </div>
+                      <div>
+                        <label class="mb-0" for="teams-resolved" style="font-size:13px;font-weight:500;cursor:pointer">Resolved</label>
+                        <div class="form-text">Send when an alert clears (off by default).</div>
+                      </div>
+                    </div>
+                  </div>
+                </div>
+
+                <!-- Test button -->
+                <div class="col-12 pt-1" style="border-top:1px solid var(--dc-border-color)">
+                  <button
+                    class="btn btn-sm btn-outline-secondary"
+                    [disabled]="!cfg.teamsNotifications.webhookUrl || testingWebhook()"
+                    (click)="testWebhook(cfg.teamsNotifications.webhookUrl)"
+                    title="Send a test message to the configured webhook"
+                  >
+                    @if (testingWebhook()) {
+                      <span class="spinner-border spinner-border-sm me-1"></span>Sending...
+                    } @else {
+                      <i class="bi bi-send me-1"></i>Send Test Message
+                    }
+                  </button>
+                  @if (testResult()) {
+                    <span class="ms-3" style="font-size:12px" [class.text-success]="testResult() === 'ok'" [class.text-danger]="testResult() !== 'ok'">
+                      {{ testResult() === 'ok' ? '✓ Message delivered' : '✗ ' + testResult() }}
+                    </span>
+                  }
+                </div>
+
+              </div>
+            </div>
+          </div>
+        </div>
+
         <!-- Meta -->
         <div class="col-12">
           <div class="text-muted" style="font-size:11.5px">
@@ -304,6 +412,8 @@ export class ConfigComponent {
   readonly saving = signal(false);
   readonly savedMessage = signal('');
   readonly errorMessage = signal('');
+  readonly testingWebhook = signal(false);
+  readonly testResult = signal('');
 
   readonly configQuery = injectQuery(() => ({
     queryKey: ['config'],
@@ -362,6 +472,21 @@ export class ConfigComponent {
     const s = ms / 1000;
     if (s < 60) return `${s}s`;
     return `${Math.round(s / 60)}m`;
+  }
+
+  testWebhook(webhookUrl: string): void {
+    if (!webhookUrl) return;
+    this.testingWebhook.set(true);
+    this.testResult.set('');
+    this.configApi.testTeamsWebhook(webhookUrl).then(() => {
+      this.testingWebhook.set(false);
+      this.testResult.set('ok');
+      setTimeout(() => this.testResult.set(''), 5000);
+    }).catch((err: Error) => {
+      this.testingWebhook.set(false);
+      this.testResult.set(err?.message ?? 'Failed to deliver message');
+      setTimeout(() => this.testResult.set(''), 8000);
+    });
   }
 
   formatDate(iso: string): string {

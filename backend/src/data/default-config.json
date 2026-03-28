@@ -49,6 +49,14 @@
     "enableVertexLogs": false,
     "enableDarkMode": true
   },
+  "teamsNotifications": {
+    "enabled": false,
+    "webhookUrl": "",
+    "minSeverity": "warning",
+    "notifyOnNew": true,
+    "notifyOnEscalation": true,
+    "notifyOnResolution": false
+  },
   "displayConfig": {
     "defaultTheme": "light",
     "dateFormat": "YYYY-MM-DD HH:mm",

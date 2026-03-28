@@ -1,0 +1,181 @@
+# ──────────────────────────────────────────────────────────────────────────────
+# Backend pipeline — triggers only when backend/ changes.
+#
+# Build strategy:
+#   CI agent  →  installs from private registry, compiles TypeScript, prunes
+#               devDependencies, publishes dist/ + node_modules/ as artifact
+#   Docker    →  copies pre-built artifact only (no npm, no tsc, no credentials)
+#
+# Required variable group: devops-console-gcp
+#   GCP_PROJECT_ID          — GCP project ID
+#   GCP_REGION              — e.g. us-central1
+#   GCP_SA_KEY              — (secret) SA key JSON  (Artifact Registry Writer, Cloud Run Developer)
+#   ENV                     — target environment: dev | staging | prod
+#   AZURE_ARTIFACTS_TOKEN   — (secret) PAT with Azure Artifacts read scope
+#                             (only needed when using a private Azure Artifacts npm feed)
+# ──────────────────────────────────────────────────────────────────────────────
+
+trigger:
+  branches:
+    include:
+      - main
+  paths:
+    include:
+      - backend/**
+
+pr:
+  branches:
+    include:
+      - '*'
+  paths:
+    include:
+      - backend/**
+
+variables:
+  - group: devops-console-gcp
+  - name: IMAGE
+    value: $(GCP_REGION)-docker.pkg.dev/$(GCP_PROJECT_ID)/devops-console/backend
+  - name: NODE_VERSION
+    value: '22.x'
+
+pool:
+  vmImage: ubuntu-latest
+
+stages:
+
+  # ── Stage 1: CI — install, lint, compile, prune ──────────────────────────
+  - stage: ci
+    displayName: Lint & Build
+    jobs:
+      - job: build
+        displayName: Node.js build
+        steps:
+          - task: NodeTool@0
+            displayName: Use Node.js $(NODE_VERSION)
+            inputs:
+              versionSpec: $(NODE_VERSION)
+
+          # Authenticate to the private npm registry.
+          # The npmAuthenticate task writes a temporary .npmrc with a short-lived
+          # token. Credentials are scoped to this job and never leave the agent.
+          - task: npmAuthenticate@0
+            displayName: Authenticate to private npm registry
+            inputs:
+              workingFile: backend/.npmrc
+            # Remove this task if you use only the public npm registry.
+
+          # Install all dependencies including devDependencies (tsc needs them).
+          - script: npm ci
+            displayName: Install all dependencies
+            workingDirectory: backend
+
+          - script: npm run lint
+            displayName: Lint
+            workingDirectory: backend
+
+          - script: npm run build
+            displayName: Compile TypeScript
+            workingDirectory: backend
+
+          # Strip devDependencies from node_modules AFTER compilation.
+          # The Docker image only receives the pruned production modules.
+          # This is the key step that keeps credentials and build tools out of the image.
+          - script: npm prune --omit=dev
+            displayName: Prune devDependencies
+            workingDirectory: backend
+
+          # Publish three artifacts together so the CD stage can build Docker
+          # without any npm install step:
+          #   dist/         — compiled JS
+          #   node_modules/ — production deps only (devDeps stripped above)
+          #   package.json  — runtime metadata
+          - task: PublishPipelineArtifact@1
+            displayName: Publish compiled dist
+            inputs:
+              targetPath: backend/dist
+              artifact: backend-dist
+              publishLocation: pipeline
+
+          - task: PublishPipelineArtifact@1
+            displayName: Publish production node_modules
+            inputs:
+              targetPath: backend/node_modules
+              artifact: backend-node-modules
+              publishLocation: pipeline
+
+          - task: PublishPipelineArtifact@1
+            displayName: Publish package.json
+            inputs:
+              targetPath: backend/package.json
+              artifact: backend-package-json
+              publishLocation: pipeline
+
+  # ── Stage 2: CD — docker build → push → deploy ───────────────────────────
+  # Runs only on main branch after CI passes.
+  - stage: cd
+    displayName: Push & Deploy
+    dependsOn: ci
+    condition: and(succeeded(), eq(variables['Build.SourceBranch'], 'refs/heads/main'))
+    jobs:
+      - deployment: deploy
+        displayName: Build image → push → deploy
+        environment: $(ENV)
+        strategy:
+          runOnce:
+            deploy:
+              steps:
+                # Check out only the Dockerfile — not the full source tree.
+                - checkout: self
+                  sparse: true
+                  fetchDepth: 1
+
+                # Restore the three artifacts into the paths the Dockerfile expects.
+                - task: DownloadPipelineArtifact@2
+                  displayName: Download dist
+                  inputs:
+                    artifact: backend-dist
+                    targetPath: $(Build.SourcesDirectory)/backend/dist
+
+                - task: DownloadPipelineArtifact@2
+                  displayName: Download node_modules
+                  inputs:
+                    artifact: backend-node-modules
+                    targetPath: $(Build.SourcesDirectory)/backend/node_modules
+
+                - task: DownloadPipelineArtifact@2
+                  displayName: Download package.json
+                  inputs:
+                    artifact: backend-package-json
+                    targetPath: $(Build.SourcesDirectory)/backend
+
+                - script: |
+                    echo '$(GCP_SA_KEY)' | gcloud auth activate-service-account --key-file=-
+                    gcloud auth configure-docker $(GCP_REGION)-docker.pkg.dev --quiet
+                  displayName: Authenticate to GCP
+
+                # Docker build — no npm inside; just COPYs the pre-built artifacts.
+                # Context is backend/ so Dockerfile can reach dist/ and node_modules/.
+                - script: |
+                    docker build \
+                      --no-cache \
+                      --pull \
+                      --label "build.id=$(Build.BuildId)" \
+                      --label "build.branch=$(Build.SourceBranchName)" \
+                      --label "build.commit=$(Build.SourceVersion)" \
+                      -t $(IMAGE):$(Build.BuildId) \
+                      -t $(IMAGE):latest \
+                      backend/
+                  displayName: Build Docker image
+
+                - script: |
+                    docker push $(IMAGE):$(Build.BuildId)
+                    docker push $(IMAGE):latest
+                  displayName: Push to Artifact Registry
+
+                - script: |
+                    gcloud run deploy devops-console-$(ENV)-api \
+                      --image   $(IMAGE):$(Build.BuildId) \
+                      --region  $(GCP_REGION) \
+                      --project $(GCP_PROJECT_ID) \
+                      --quiet
+                  displayName: Deploy to Cloud Run
