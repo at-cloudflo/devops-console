@@ -18,7 +18,7 @@ import { VertexJob, VertexJobDetail, VertexJobState, VertexJobsFilter } from '..
  *   (none needed on Cloud Run — uses Workload Identity automatically)
  */
 
-export const USE_MOCK_MLOPS = process.env.USE_MOCK_MLOPS !== 'false';
+export const USE_MOCK_MLOPS = process.env.USE_MOCK_MLOPS === 'true';
 
 // ── Shared helpers ─────────────────────────────────────────────────────────
 

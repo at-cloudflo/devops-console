@@ -15,7 +15,7 @@ import { PoolSummary, AgentDetail, QueueJob, PendingApproval, AgentStatus, JobSt
  *   AZURE_DEVOPS_PROJECTS   Comma-separated project names e.g. "ProjectA,ProjectB"
  */
 
-export const USE_MOCK_DEVOPS = process.env.USE_MOCK_DEVOPS !== 'false';
+export const USE_MOCK_DEVOPS = process.env.USE_MOCK_DEVOPS === 'true';
 
 // ── Shared helpers ─────────────────────────────────────────────────────────
 
