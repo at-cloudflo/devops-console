@@ -1210,4 +1210,45 @@ The project avoids packages that require network access to external CDNs or have
 
 ---
 
-*Built as a POC. Replace mocked adapters with live integrations before production deployment.*
+## 19. Config file example
+
+```
+# Server
+NODE_ENV=development
+PORT=3000
+
+# Session
+SESSION_SECRET=189ac78490cdf7e4406a1a7e2d3da17c57dd2f82bbbf7e5b2abf603fe5e28b294a63195a40aa9a5a79a2e4c4a04e3666
+
+# CORS
+ALLOWED_ORIGINS=http://localhost:4200
+
+# Refresh intervals (milliseconds)
+POOLS_REFRESH_MS=60000
+AGENTS_REFRESH_MS=60000
+QUEUE_REFRESH_MS=30000
+APPROVALS_REFRESH_MS=30000
+VERTEX_JOBS_REFRESH_MS=60000
+ALERTS_REFRESH_MS=30000
+
+# Alert thresholds
+POOL_CRITICAL_THRESHOLD=50
+POOL_WARNING_THRESHOLD=70
+AGENT_OFFLINE_ALERT_MINUTES=30
+QUEUE_WAIT_ALERT_MINUTES=60
+APPROVAL_AGE_ALERT_HOURS=24
+
+# Teams notifications
+TEAMS_WEBHOOK_URL=
+
+# MLOps data source flag
+USE_MOCK_MLOPS=true
+
+# Azure DevOps
+AZURE_DEVOPS_ORG_URL=https://dev.azure.com/MYORG
+AZURE_DEVOPS_TOKEN=MYTOKEN
+ADO_QUEUE_CONCURRENCY=10
+ADO_APPROVAL_CONCURRENCY=15
+AZURE_DEVOPS_PROJECTS_EXCLUDE="Default,Hosted,Hosted VS2017,Hosted Windows 2019 with VS2019"
+
+```
