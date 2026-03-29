@@ -39,6 +39,7 @@ const FULL_MENU: MenuItem[] = [
     requiredRoles: ['mlops.read'],
     children: [
       { id: 'mlops-vertex', label: 'Vertex Jobs', icon: 'bi-activity', route: '/mlops/vertex-jobs', requiredRoles: ['mlops.read'] },
+      { id: 'mlops-alerts', label: 'Alerts', icon: 'bi-bell-fill', route: '/mlops/alerts', requiredRoles: ['mlops.read'] },
     ],
   },
   {

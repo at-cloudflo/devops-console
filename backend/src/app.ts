@@ -11,6 +11,7 @@ import devopsRoutes from './routes/devops.routes';
 import mlopsRoutes from './routes/mlops.routes';
 import configRoutes from './routes/config.routes';
 import systemRoutes from './routes/system.routes';
+import sseRoutes from './routes/sse.routes';
 import { notFound, errorHandler } from './middleware/error.middleware';
 
 const app = express();
@@ -66,6 +67,7 @@ app.use('/api/devops', devopsRoutes);
 app.use('/api/mlops', mlopsRoutes);
 app.use('/api/config', configRoutes);
 app.use('/api/system', systemRoutes);
+app.use('/api/events', sseRoutes);
 
 // Error handling
 app.use(notFound);

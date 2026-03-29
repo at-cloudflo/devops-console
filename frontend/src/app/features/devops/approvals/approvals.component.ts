@@ -24,13 +24,22 @@ import { LocalDatePipe } from '../../../shared/pipes/local-date.pipe';
       (onRefresh)="approvalsQuery.refetch()"
     ></app-page-header>
 
-    <div class="alert alert-info d-flex gap-2 align-items-start mb-3" style="font-size:13px;border-radius:8px">
-      <i class="bi bi-info-circle-fill mt-1"></i>
-      <div>
-        <strong>POC Read-Only Mode:</strong> Approve/Reject actions are placeholders for future implementation.
-        In production, these will call the Azure DevOps Approvals API with proper authorization.
+    <!-- Error toast -->
+    @if (actionError()) {
+      <div class="alert alert-danger d-flex align-items-center gap-2 mb-3" style="font-size:13px;border-radius:8px">
+        <i class="bi bi-exclamation-triangle-fill"></i>
+        <span>{{ actionError() }}</span>
+        <button type="button" class="btn-close ms-auto" style="font-size:11px" (click)="actionError.set(null)"></button>
       </div>
-    </div>
+    }
+
+    <!-- Success toast -->
+    @if (actionSuccess()) {
+      <div class="alert alert-success d-flex align-items-center gap-2 mb-3" style="font-size:13px;border-radius:8px">
+        <i class="bi bi-check-circle-fill"></i>
+        <span>{{ actionSuccess() }}</span>
+      </div>
+    }
 
     <div class="filters-bar">
       <div class="input-group input-group-sm" style="max-width:220px">
@@ -67,6 +76,7 @@ import { LocalDatePipe } from '../../../shared/pipes/local-date.pipe';
             <div class="card" [class.border-danger]="approval.ageMinutes > 1440">
               <div class="card-body">
                 <div class="row align-items-start">
+                  <!-- Left: info -->
                   <div class="col-lg-8">
                     <div class="d-flex align-items-start gap-3">
                       <div class="stat-icon rounded" style="width:40px;height:40px;background:rgba(245,158,11,.12);color:#d97706;flex-shrink:0">
@@ -91,23 +101,79 @@ import { LocalDatePipe } from '../../../shared/pipes/local-date.pipe';
                       </div>
                     </div>
                   </div>
+
+                  <!-- Right: age + actions -->
                   <div class="col-lg-4 mt-3 mt-lg-0 d-flex flex-column align-items-end gap-2">
                     <app-status-badge [status]="approval.status"></app-status-badge>
                     <div class="text-end" style="font-size:12px;">
-                      <span [class.text-danger]="approval.ageMinutes > 1440" [class.text-warning]="approval.ageMinutes > 120 && approval.ageMinutes <= 1440" class="fw-500">
+                      <span
+                        [class.text-danger]="approval.ageMinutes > 1440"
+                        [class.text-warning]="approval.ageMinutes > 120 && approval.ageMinutes <= 1440"
+                        class="fw-500"
+                      >
                         <i class="bi bi-clock me-1"></i>{{ formatAge(approval.ageMinutes) }}
                       </span>
                       <div class="text-muted mt-1">since {{ approval.waitingSince | localDate }}</div>
                     </div>
-                    <div class="d-flex gap-2 mt-1">
-                      <button class="btn btn-sm btn-success" disabled title="POC: Not yet implemented">
-                        <i class="bi bi-check2 me-1"></i>Approve
-                      </button>
-                      <button class="btn btn-sm btn-outline-danger" disabled title="POC: Not yet implemented">
-                        <i class="bi bi-x me-1"></i>Reject
-                      </button>
-                    </div>
-                    <span style="font-size:10px;color:var(--dc-text-muted)">[Actions disabled in POC]</span>
+
+                    <!-- Action buttons -->
+                    @if (rejectPanelId() !== approval.id) {
+                      <div class="d-flex gap-2 mt-1">
+                        <button
+                          class="btn btn-sm btn-success"
+                          [disabled]="isActing(approval.id)"
+                          (click)="approve(approval)"
+                        >
+                          @if (approvingId() === approval.id) {
+                            <span class="spinner-border spinner-border-sm me-1"></span>
+                          } @else {
+                            <i class="bi bi-check2 me-1"></i>
+                          }
+                          Approve
+                        </button>
+                        <button
+                          class="btn btn-sm btn-outline-danger"
+                          [disabled]="isActing(approval.id)"
+                          (click)="openRejectPanel(approval.id)"
+                        >
+                          <i class="bi bi-x me-1"></i>Reject
+                        </button>
+                      </div>
+                    }
+
+                    <!-- Reject panel -->
+                    @if (rejectPanelId() === approval.id) {
+                      <div class="reject-panel w-100">
+                        <textarea
+                          class="form-control form-control-sm mb-2"
+                          rows="2"
+                          placeholder="Rejection reason (optional)"
+                          [(ngModel)]="rejectComment"
+                          style="font-size:12px;resize:none"
+                        ></textarea>
+                        <div class="d-flex gap-2 justify-content-end">
+                          <button
+                            class="btn btn-sm btn-outline-secondary"
+                            [disabled]="rejectingId() === approval.id"
+                            (click)="cancelReject()"
+                          >
+                            Cancel
+                          </button>
+                          <button
+                            class="btn btn-sm btn-danger"
+                            [disabled]="rejectingId() === approval.id"
+                            (click)="confirmReject(approval)"
+                          >
+                            @if (rejectingId() === approval.id) {
+                              <span class="spinner-border spinner-border-sm me-1"></span>
+                            } @else {
+                              <i class="bi bi-x me-1"></i>
+                            }
+                            Confirm Reject
+                          </button>
+                        </div>
+                      </div>
+                    }
                   </div>
                 </div>
               </div>
@@ -128,15 +194,26 @@ import { LocalDatePipe } from '../../../shared/pipes/local-date.pipe';
       }
     }
   `,
-  styles: [`.border-danger { border-left: 3px solid #ef4444 !important; }`]
+  styles: [`
+    .border-danger { border-left: 3px solid #ef4444 !important; }
+    .reject-panel { background: var(--dc-surface-alt, #f8f9fa); border-radius: 8px; padding: 10px; }
+  `]
 })
 export class ApprovalsComponent {
   private readonly devopsApi = inject(DevopsApiService);
   private readonly refreshIntervalSvc = inject(RefreshIntervalService);
+
   searchTerm = '';
   projectFilter = '';
+  rejectComment = '';
+
   readonly page = signal(1);
   readonly pageSize = signal(25);
+  readonly approvingId = signal<string | null>(null);
+  readonly rejectPanelId = signal<string | null>(null);
+  readonly rejectingId = signal<string | null>(null);
+  readonly actionError = signal<string | null>(null);
+  readonly actionSuccess = signal<string | null>(null);
 
   readonly approvalsQuery = injectQuery(() => ({
     queryKey: ['devops', 'approvals', this.searchTerm, this.projectFilter, this.page(), this.pageSize()],
@@ -150,17 +227,59 @@ export class ApprovalsComponent {
     refetchInterval: this.refreshIntervalSvc.interval(),
   }));
 
-  onFilterChange(): void {
-    this.page.set(1);
-  }
+  onFilterChange(): void { this.page.set(1); }
 
-  filtered(): PendingApproval[] {
-    return this.approvalsQuery.data()?.data ?? [];
-  }
+  filtered(): PendingApproval[] { return this.approvalsQuery.data()?.data ?? []; }
 
   uniqueProjects(): string[] {
-    const items = this.approvalsQuery.data()?.data ?? [];
-    return [...new Set(items.map((a) => a.project))].sort();
+    return [...new Set((this.approvalsQuery.data()?.data ?? []).map((a) => a.project))].sort();
+  }
+
+  isActing(id: string): boolean {
+    return this.approvingId() === id || this.rejectingId() === id;
+  }
+
+  openRejectPanel(id: string): void {
+    this.rejectComment = '';
+    this.rejectPanelId.set(id);
+    this.actionError.set(null);
+  }
+
+  cancelReject(): void {
+    this.rejectPanelId.set(null);
+    this.rejectComment = '';
+  }
+
+  approve(approval: PendingApproval): void {
+    this.actionError.set(null);
+    this.actionSuccess.set(null);
+    this.approvingId.set(approval.id);
+    this.devopsApi.approveApproval(approval.id, approval.project).then(() => {
+      this.approvingId.set(null);
+      this.actionSuccess.set(`"${approval.pipelineName}" approved successfully.`);
+      void this.approvalsQuery.refetch();
+      setTimeout(() => this.actionSuccess.set(null), 4000);
+    }).catch((err: unknown) => {
+      this.approvingId.set(null);
+      this.actionError.set(this.extractError(err));
+    });
+  }
+
+  confirmReject(approval: PendingApproval): void {
+    this.actionError.set(null);
+    this.actionSuccess.set(null);
+    this.rejectingId.set(approval.id);
+    this.devopsApi.rejectApproval(approval.id, approval.project, this.rejectComment || undefined).then(() => {
+      this.rejectingId.set(null);
+      this.rejectPanelId.set(null);
+      this.rejectComment = '';
+      this.actionSuccess.set(`"${approval.pipelineName}" rejected.`);
+      void this.approvalsQuery.refetch();
+      setTimeout(() => this.actionSuccess.set(null), 4000);
+    }).catch((err: unknown) => {
+      this.rejectingId.set(null);
+      this.actionError.set(this.extractError(err));
+    });
   }
 
   formatAge(minutes: number): string {
@@ -170,4 +289,11 @@ export class ApprovalsComponent {
     return `${Math.floor(h / 24)}d ${h % 24}h`;
   }
 
+  private extractError(err: unknown): string {
+    if (err && typeof err === 'object' && 'error' in err) {
+      const e = (err as { error?: { error?: string } }).error;
+      return e?.error ?? 'Action failed. Please try again.';
+    }
+    return 'Action failed. Please try again.';
+  }
 }

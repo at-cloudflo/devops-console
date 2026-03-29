@@ -3,6 +3,8 @@ import * as mlopsService from './mlops.service';
 import * as alertService from './alert.service';
 import * as cacheService from '../cache/cache.service';
 import * as configService from './config.service';
+import * as poolHistoryService from './pool-history.service';
+import { broadcast } from './sse.service';
 
 interface RefreshStatus {
   resource: string;
@@ -13,24 +15,35 @@ interface RefreshStatus {
 
 const refreshTimestamps = new Map<string, number>();
 
+async function refreshPools(force: boolean): Promise<void> {
+  const pools = await devopsService.getPools(force);
+  poolHistoryService.recordSnapshot(pools);
+}
+
 async function refreshAll(): Promise<void> {
   const config = configService.getConfig();
   const intervals = config.refreshIntervals;
 
   const tasks = [
-    { key: 'pools', fn: () => devopsService.getPools(true), interval: intervals.poolsMs },
+    { key: 'pools', fn: () => refreshPools(true), interval: intervals.poolsMs },
     { key: 'agents', fn: () => devopsService.getAgents(undefined, true), interval: intervals.agentsMs },
     { key: 'queue', fn: () => devopsService.getQueueJobs(undefined, undefined, undefined, true), interval: intervals.queueMs },
     { key: 'approvals', fn: () => devopsService.getApprovals(undefined, true), interval: intervals.approvalsMs },
     { key: 'vertexJobs', fn: () => mlopsService.getVertexJobs(undefined, true), interval: intervals.vertexJobsMs },
   ];
 
-  for (const task of tasks) {
-    try {
-      await task.fn();
-      refreshTimestamps.set(task.key, Date.now());
-    } catch (err) {
-      console.error(`[refresh] Failed to refresh ${task.key}:`, err);
+  const settled = await Promise.allSettled(
+    tasks.map((task) =>
+      task.fn().then(() => {
+        refreshTimestamps.set(task.key, Date.now());
+        broadcast(task.key);
+      })
+    )
+  );
+
+  for (const result of settled) {
+    if (result.status === 'rejected') {
+      console.error('[refresh] Failed to refresh resource:', result.reason);
     }
   }
 
@@ -38,6 +51,7 @@ async function refreshAll(): Promise<void> {
   try {
     alertService.runAlertEngine();
     refreshTimestamps.set('alerts', Date.now());
+    broadcast('alerts');
   } catch (err) {
     console.error('[refresh] Alert engine error:', err);
   }
@@ -83,7 +97,7 @@ export function startBackgroundRefresh(): void {
     const now = Date.now();
 
     const checks = [
-      { key: 'pools', fn: () => devopsService.getPools(true), interval: intervals.poolsMs },
+      { key: 'pools', fn: () => refreshPools(true), interval: intervals.poolsMs },
       { key: 'agents', fn: () => devopsService.getAgents(undefined, true), interval: intervals.agentsMs },
       { key: 'queue', fn: () => devopsService.getQueueJobs(undefined, undefined, undefined, true), interval: intervals.queueMs },
       { key: 'approvals', fn: () => devopsService.getApprovals(undefined, true), interval: intervals.approvalsMs },
@@ -96,8 +110,10 @@ export function startBackgroundRefresh(): void {
         fn()
           .then(() => {
             refreshTimestamps.set(key, Date.now());
+            broadcast(key);
             alertService.runAlertEngine();
             refreshTimestamps.set('alerts', Date.now());
+            broadcast('alerts');
           })
           .catch((err: unknown) => console.error(`[refresh] ${key}:`, err));
       }

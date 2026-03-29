@@ -39,6 +39,7 @@ export async function testTeamsWebhook(req: Request, res: Response): Promise<voi
   }
   const testAlert: Alert = {
     id: 'test-message',
+    domain: 'devops',
     type: 'system',
     severity: 'info',
     source: 'DevOps Console',

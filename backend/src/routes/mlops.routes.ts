@@ -7,5 +7,7 @@ const mlopsRead = requireRole('mlops.read', 'portal.admin');
 
 router.get('/vertex/jobs', requireAuth, mlopsRead, mlopsController.getVertexJobs);
 router.get('/vertex/jobs/:id', requireAuth, mlopsRead, mlopsController.getVertexJobById);
+router.get('/alerts', requireAuth, mlopsRead, mlopsController.getMlopsAlerts);
+router.post('/alerts/:id/acknowledge', requireAuth, mlopsRead, mlopsController.acknowledgeMlopsAlert);
 
 export default router;

@@ -2,6 +2,7 @@ import * as azureAdapter from '../adapters/azure-devops.adapter';
 import * as cacheService from '../cache/cache.service';
 import { PoolSummary, AgentDetail, QueueJob, PendingApproval } from '../models/devops.model';
 
+
 const CACHE_TTL_POOLS = 60_000;
 const CACHE_TTL_AGENTS = 60_000;
 const CACHE_TTL_QUEUE = 30_000;
@@ -40,10 +41,12 @@ export async function getQueueJobs(
     if (pool) cached = cached.filter((j: QueueJob) => j.pool === pool);
     return cached;
   }
-  const jobs = await azureAdapter.fetchQueueJobs(since, project, pool);
-  // Store unfiltered result in cache
   const allJobs = await azureAdapter.fetchQueueJobs();
   cacheService.setCache('queue', allJobs);
+  let jobs = allJobs;
+  if (since) jobs = jobs.filter((j) => new Date(j.requestedAt) >= since);
+  if (project) jobs = jobs.filter((j) => j.project === project);
+  if (pool) jobs = jobs.filter((j) => j.pool === pool);
   return jobs;
 }
 
@@ -56,4 +59,14 @@ export async function getApprovals(project?: string, forceRefresh = false): Prom
   cacheService.setCache('approvals', approvals);
   if (project) return approvals.filter((a) => a.project === project);
   return approvals;
+}
+
+export async function submitApproval(
+  project: string,
+  approvalId: string,
+  status: 'approved' | 'rejected',
+  comment?: string
+): Promise<void> {
+  await azureAdapter.submitApproval(project, approvalId, status, comment);
+  cacheService.clearCache('approvals'); // force re-fetch so the item disappears from list
 }

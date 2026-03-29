@@ -1,75 +1,44 @@
-import path from 'path';
-import fs from 'fs';
 import { PoolSummary, AgentDetail, QueueJob, PendingApproval, AgentStatus, JobStatus, AlertState } from '../models/devops.model';
+import { concurrentMap } from '../utils/concurrent-map';
 
 /**
  * Azure DevOps Adapter
  *
- * Switch between mock and live data via environment variable:
- *   USE_MOCK_DEVOPS=false   → calls Azure DevOps REST API v7.1
- *   USE_MOCK_DEVOPS=true    → reads static mock JSON (default)
+ * Calls Azure DevOps REST API v7.1 using Bearer token auth.
+ * All projects are discovered dynamically from the org; use the exclusion
+ * list to skip projects you don't want to monitor.
  *
- * Required env vars for live mode:
- *   AZURE_DEVOPS_ORG_URL    e.g. https://dev.azure.com/my-org
- *   AZURE_DEVOPS_PAT        Personal Access Token (read scopes: Agent Pools, Build, Release, Environment)
- *   AZURE_DEVOPS_PROJECTS   Comma-separated project names e.g. "ProjectA,ProjectB"
+ * Required env vars:
+ *   AZURE_DEVOPS_ORG_URL              e.g. https://dev.azure.com/ali0046
+ *   AZURE_DEVOPS_TOKEN                Bearer token
+ *
+ * Optional env vars:
+ *   AZURE_DEVOPS_PROJECTS_EXCLUDE     Comma-separated project names to skip
+ *   ADO_QUEUE_CONCURRENCY             Max parallel requests for queue jobs (default 10)
+ *   ADO_APPROVAL_CONCURRENCY          Max parallel requests for approvals (default 15)
  */
 
-export const USE_MOCK_DEVOPS = process.env.USE_MOCK_DEVOPS !== 'false';
-
-// ── Shared helpers ─────────────────────────────────────────────────────────
-
-function loadMockData<T>(filename: string): T {
-  const filePath = path.join(__dirname, '../data', filename);
-  return JSON.parse(fs.readFileSync(filePath, 'utf-8')) as T;
-}
-
-function simulateDelay(ms = 50): Promise<void> {
-  return new Promise((resolve) => setTimeout(resolve, ms));
-}
-
-// ── Mock implementations ───────────────────────────────────────────────────
-
-async function fetchPoolsMock(): Promise<PoolSummary[]> {
-  await simulateDelay(30);
-  return loadMockData<PoolSummary[]>('mock-pools.json');
-}
-
-async function fetchAgentsMock(poolId?: string): Promise<AgentDetail[]> {
-  await simulateDelay(40);
-  const agents = loadMockData<AgentDetail[]>('mock-agents.json');
-  return poolId ? agents.filter((a) => a.poolId === poolId) : agents;
-}
-
-async function fetchQueueJobsMock(since?: Date, projectKey?: string, poolName?: string): Promise<QueueJob[]> {
-  await simulateDelay(35);
-  let jobs = loadMockData<QueueJob[]>('mock-queue.json');
-  if (since) jobs = jobs.filter((j) => new Date(j.requestedAt) >= since);
-  if (projectKey) jobs = jobs.filter((j) => j.project === projectKey);
-  if (poolName) jobs = jobs.filter((j) => j.pool === poolName);
-  return jobs;
-}
-
-async function fetchApprovalsMock(projectKey?: string): Promise<PendingApproval[]> {
-  await simulateDelay(25);
-  let approvals = loadMockData<PendingApproval[]>('mock-approvals.json');
-  if (projectKey) approvals = approvals.filter((a) => a.project === projectKey);
-  return approvals;
-}
-
-// ── Live configuration ─────────────────────────────────────────────────────
-
 const ADO_ORG_URL = (process.env.AZURE_DEVOPS_ORG_URL ?? '').replace(/\/$/, '');
-const ADO_PAT = process.env.AZURE_DEVOPS_PAT ?? '';
-const ADO_PROJECTS = (process.env.AZURE_DEVOPS_PROJECTS ?? '')
-  .split(',')
-  .map((p) => p.trim())
-  .filter(Boolean);
+const ADO_TOKEN = process.env.AZURE_DEVOPS_TOKEN ?? '';
 const ADO_ORG_NAME = ADO_ORG_URL.split('/').pop() ?? '';
 
+const ADO_EXCLUDE = new Set(
+  (process.env.AZURE_DEVOPS_PROJECTS_EXCLUDE ?? '')
+    .split(',').map((p) => p.trim().toLowerCase()).filter(Boolean)
+);
+
+const ADO_QUEUE_CONCURRENCY = parseInt(process.env.ADO_QUEUE_CONCURRENCY ?? '10', 10);
+const ADO_APPROVAL_CONCURRENCY = parseInt(process.env.ADO_APPROVAL_CONCURRENCY ?? '15', 10);
+
+// Project list cache — refreshed every 10 minutes
+let _projectCache: string[] | null = null;
+let _projectCachedAt = 0;
+const PROJECT_CACHE_TTL_MS = 10 * 60 * 1000;
+
+// ── HTTP helpers ───────────────────────────────────────────────────────────
+
 function adoHeaders(): Record<string, string> {
-  const token = Buffer.from(`:${ADO_PAT}`).toString('base64');
-  return { Authorization: `Basic ${token}`, Accept: 'application/json' };
+  return { Authorization: `Bearer ${ADO_TOKEN}`, Accept: 'application/json' };
 }
 
 async function adoGet<T>(url: string): Promise<T> {
@@ -81,7 +50,77 @@ async function adoGet<T>(url: string): Promise<T> {
   return res.json() as Promise<T>;
 }
 
-// ── Live: type mappers ─────────────────────────────────────────────────────
+async function adoPatch<T>(url: string, body: unknown): Promise<T> {
+  const res = await fetch(url, {
+    method: 'PATCH',
+    headers: { ...adoHeaders(), 'Content-Type': 'application/json' },
+    body: JSON.stringify(body),
+  });
+  if (!res.ok) {
+    const text = await res.text().catch(() => '');
+    throw new Error(`ADO API ${res.status} ${res.statusText}: ${url}\n${text}`);
+  }
+  return res.json() as Promise<T>;
+}
+
+/** Wraps adoGet with a single retry on HTTP 429, honouring Retry-After. */
+async function adoGetWithRetry<T>(url: string, retries = 2): Promise<T> {
+  for (let attempt = 0; attempt <= retries; attempt++) {
+    const res = await fetch(url, { headers: adoHeaders() });
+    if (res.status === 429 && attempt < retries) {
+      const retryAfter = parseInt(res.headers.get('retry-after') ?? '5', 10);
+      await new Promise((r) => setTimeout(r, retryAfter * 1000));
+      continue;
+    }
+    if (!res.ok) {
+      const body = await res.text().catch(() => '');
+      throw new Error(`ADO API ${res.status} ${res.statusText}: ${url}\n${body}`);
+    }
+    return res.json() as Promise<T>;
+  }
+  throw new Error(`ADO API failed after ${retries} retries: ${url}`);
+}
+
+// ── Project discovery ──────────────────────────────────────────────────────
+
+export function clearProjectCache(): void {
+  _projectCache = null;
+  _projectCachedAt = 0;
+}
+
+export async function fetchAllProjects(): Promise<string[]> {
+  if (_projectCache && Date.now() - _projectCachedAt < PROJECT_CACHE_TTL_MS) {
+    return _projectCache;
+  }
+
+  const projects: string[] = [];
+  let continuationToken: string | undefined;
+
+  do {
+    const tokenParam = continuationToken
+      ? `&continuationToken=${continuationToken}`
+      : '';
+    const res = await fetch(
+      `${ADO_ORG_URL}/_apis/projects?$top=500${tokenParam}&api-version=7.1`,
+      { headers: adoHeaders() }
+    );
+    if (!res.ok) {
+      const body = await res.text().catch(() => '');
+      throw new Error(`ADO projects API ${res.status}: ${body}`);
+    }
+    const json = await res.json() as { value: Array<{ name: string }> };
+    for (const p of json.value) {
+      if (!ADO_EXCLUDE.has(p.name.toLowerCase())) projects.push(p.name);
+    }
+    continuationToken = res.headers.get('x-ms-continuationtoken') ?? undefined;
+  } while (continuationToken);
+
+  _projectCache = projects;
+  _projectCachedAt = Date.now();
+  return projects;
+}
+
+// ── Type mappers ───────────────────────────────────────────────────────────
 
 function mapAgentStatus(adoStatus: string, enabled: boolean): AgentStatus {
   if (!enabled) return 'disabled';
@@ -102,7 +141,7 @@ function mapBuildStatus(status: string, result?: string): JobStatus {
       if (result === 'canceled') return 'cancelled';
       return 'completed';
     default:
-      return 'queued'; // notStarted, postponed
+      return 'queued';
   }
 }
 
@@ -112,14 +151,13 @@ function poolAlertState(healthPercent: number): AlertState {
   return 'critical';
 }
 
-// ── Live implementations ───────────────────────────────────────────────────
+// ── Implementations ────────────────────────────────────────────────────────
 
-async function fetchPoolsLive(): Promise<PoolSummary[]> {
+export async function fetchPools(): Promise<PoolSummary[]> {
   const poolsResp = await adoGet<{ value: AdoPool[] }>(
     `${ADO_ORG_URL}/_apis/distributedtask/pools?api-version=7.1`
   );
 
-  // Fetch agents for every pool in parallel to compute summary stats
   const agentResults = await Promise.all(
     poolsResp.value.map((pool) =>
       adoGet<{ value: AdoAgent[] }>(
@@ -156,7 +194,7 @@ async function fetchPoolsLive(): Promise<PoolSummary[]> {
   });
 }
 
-async function fetchAgentsLive(poolId?: string): Promise<AgentDetail[]> {
+export async function fetchAgents(poolId?: string): Promise<AgentDetail[]> {
   let targetPools: Array<{ id: number; name: string }>;
 
   if (poolId) {
@@ -201,17 +239,15 @@ async function fetchAgentsLive(poolId?: string): Promise<AgentDetail[]> {
   return results.flat();
 }
 
-async function fetchQueueJobsLive(since?: Date, projectKey?: string): Promise<QueueJob[]> {
-  const projects = projectKey ? [projectKey] : ADO_PROJECTS;
-  if (projects.length === 0) {
-    throw new Error('Set AZURE_DEVOPS_PROJECTS (comma-separated) to use live queue data');
-  }
+export async function fetchQueueJobs(since?: Date, projectKey?: string): Promise<QueueJob[]> {
+  const projects = projectKey ? [projectKey] : await fetchAllProjects();
 
   const sinceParam = since ? `&minTime=${since.toISOString()}` : '';
 
-  const results = await Promise.all(
-    projects.map((project) =>
-      adoGet<{ value: AdoBuild[] }>(
+  const results = await concurrentMap(
+    projects,
+    (project) =>
+      adoGetWithRetry<{ value: AdoBuild[] }>(
         `${ADO_ORG_URL}/${project}/_apis/build/builds?$top=100${sinceParam}&api-version=7.1`
       )
         .then((r) =>
@@ -239,22 +275,20 @@ async function fetchQueueJobsLive(since?: Date, projectKey?: string): Promise<Qu
             } satisfies QueueJob;
           })
         )
-        .catch(() => [] as QueueJob[])
-    )
+        .catch(() => [] as QueueJob[]),
+    ADO_QUEUE_CONCURRENCY
   );
 
   return results.flat();
 }
 
-async function fetchApprovalsLive(projectKey?: string): Promise<PendingApproval[]> {
-  const projects = projectKey ? [projectKey] : ADO_PROJECTS;
-  if (projects.length === 0) {
-    throw new Error('Set AZURE_DEVOPS_PROJECTS (comma-separated) to use live approvals data');
-  }
+export async function fetchApprovals(projectKey?: string): Promise<PendingApproval[]> {
+  const projects = projectKey ? [projectKey] : await fetchAllProjects();
 
-  const results = await Promise.all(
-    projects.map((project) =>
-      adoGet<{ value: AdoApproval[] }>(
+  const results = await concurrentMap(
+    projects,
+    (project) =>
+      adoGetWithRetry<{ value: AdoApproval[] }>(
         `${ADO_ORG_URL}/${project}/_apis/pipelines/approvals?state=pending&api-version=7.1-preview.1`
       )
         .then((r) =>
@@ -271,7 +305,7 @@ async function fetchApprovalsLive(projectKey?: string): Promise<PendingApproval[
               stageName: a.stage?.name ?? '',
               environmentName: a.environment?.name ?? '',
               approvers: (a.steps ?? [])
-                .map((s) => s.actualApprover?.uniqueName ?? s.actualApprover?.displayName ?? '')
+                .map((s) => s.assignedApprover?.uniqueName ?? s.assignedApprover?.displayName ?? '')
                 .filter(Boolean),
               waitingSince,
               ageMinutes,
@@ -280,8 +314,8 @@ async function fetchApprovalsLive(projectKey?: string): Promise<PendingApproval[
             } satisfies PendingApproval;
           })
         )
-        .catch(() => [] as PendingApproval[])
-    )
+        .catch(() => [] as PendingApproval[]),
+    ADO_APPROVAL_CONCURRENCY
   );
 
   return results.flat();
@@ -310,12 +344,22 @@ interface AdoApproval {
   pipeline?: { name: string; runId?: number };
   stage?: { name: string };
   environment?: { name: string };
-  steps?: Array<{ actualApprover?: { uniqueName?: string; displayName?: string } }>;
+  steps?: Array<{
+    assignedApprover?: { uniqueName?: string; displayName?: string };
+    actualApprover?: { uniqueName?: string; displayName?: string };
+  }>;
 }
 
-// ── Public exports ─────────────────────────────────────────────────────────
+// ── Approval actions ───────────────────────────────────────────────────────
 
-export const fetchPools = USE_MOCK_DEVOPS ? fetchPoolsMock : fetchPoolsLive;
-export const fetchAgents = USE_MOCK_DEVOPS ? fetchAgentsMock : fetchAgentsLive;
-export const fetchQueueJobs = USE_MOCK_DEVOPS ? fetchQueueJobsMock : fetchQueueJobsLive;
-export const fetchApprovals = USE_MOCK_DEVOPS ? fetchApprovalsMock : fetchApprovalsLive;
+export async function submitApproval(
+  project: string,
+  approvalId: string,
+  status: 'approved' | 'rejected',
+  comment?: string
+): Promise<void> {
+  await adoPatch<unknown>(
+    `${ADO_ORG_URL}/${encodeURIComponent(project)}/_apis/pipelines/approvals?api-version=7.1-preview.1`,
+    [{ approvalId, status, comment: comment ?? '' }]
+  );
+}

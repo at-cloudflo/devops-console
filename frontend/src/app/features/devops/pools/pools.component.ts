@@ -11,11 +11,12 @@ import { StatusBadgeComponent } from '../../../shared/components/status-badge/st
 import { LoadingSpinnerComponent } from '../../../shared/components/loading-spinner/loading-spinner.component';
 import { PaginatorComponent } from '../../../shared/components/paginator/paginator.component';
 import { LocalDatePipe } from '../../../shared/pipes/local-date.pipe';
+import { PoolUtilisationChartComponent } from './pool-utilisation-chart.component';
 
 @Component({
   selector: 'app-pools',
   standalone: true,
-  imports: [CommonModule, RouterModule, FormsModule, PageHeaderComponent, StatusBadgeComponent, LoadingSpinnerComponent, PaginatorComponent, LocalDatePipe],
+  imports: [CommonModule, RouterModule, FormsModule, PageHeaderComponent, StatusBadgeComponent, LoadingSpinnerComponent, PaginatorComponent, LocalDatePipe, PoolUtilisationChartComponent],
   template: `
     <app-page-header
       title="Agent Pools"
@@ -145,6 +146,8 @@ import { LocalDatePipe } from '../../../shared/pipes/local-date.pipe';
                     </div>
                   </div>
                 </div>
+                <!-- Utilisation chart -->
+                <app-pool-utilisation-chart [poolId]="pool.id"></app-pool-utilisation-chart>
                 <div class="card-footer d-flex justify-content-between align-items-center" style="background:transparent;border-top:1px solid var(--dc-card-border);padding:10px 16px">
                   <span style="font-size:11px;color:var(--dc-text-muted)">
                     <i class="bi bi-clock me-1"></i>{{ pool.lastRefresh | localDate }}

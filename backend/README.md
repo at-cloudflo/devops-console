@@ -115,8 +115,9 @@ Copy `.env.example` to `.env`. All variables have sensible defaults for local PO
 | `AGENT_OFFLINE_ALERT_MINUTES` | `30` | Minutes offline before an agent alert fires |
 | `QUEUE_WAIT_ALERT_MINUTES` | `60` | Queue wait time before an alert fires |
 | `APPROVAL_AGE_ALERT_HOURS` | `24` | Approval age before an alert fires |
-| `AZURE_DEVOPS_ORG_URL` | — | Azure DevOps org URL (leave empty for POC) |
-| `AZURE_DEVOPS_PAT` | — | Azure DevOps PAT (leave empty for POC) |
+| `AZURE_DEVOPS_ORG_URL` | `https://dev.azure.com/ali0046` | Azure DevOps org URL |
+| `AZURE_DEVOPS_TOKEN` | — | Azure DevOps Bearer token |
+| `AZURE_DEVOPS_PROJECTS` | — | Comma-separated project names |
 | `GCP_PROJECT_ID` | — | GCP project ID (leave empty for POC) |
 | `GCP_REGION` | — | GCP region (leave empty for POC) |
 | `ENTRA_TENANT_ID` | — | Entra ID tenant (leave empty for POC) |

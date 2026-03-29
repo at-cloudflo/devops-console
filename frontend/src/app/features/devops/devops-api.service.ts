@@ -1,7 +1,7 @@
 import { Injectable, inject } from '@angular/core';
 import { firstValueFrom } from 'rxjs';
 import { ApiClientService } from '../../core/http/api-client.service';
-import { PoolSummary, AgentDetail, QueueJob, PendingApproval, Alert } from '../../models/devops.model';
+import { PoolSummary, AgentDetail, QueueJob, PendingApproval, Alert, PoolHistoryData } from '../../models/devops.model';
 import { ApiResponse, PaginatedResponse } from '../../models/common.model';
 
 @Injectable({ providedIn: 'root' })
@@ -38,5 +38,17 @@ export class DevopsApiService {
 
   acknowledgeAlert(id: string): Promise<ApiResponse<Alert>> {
     return firstValueFrom(this.api.post<ApiResponse<Alert>>(`/devops/alerts/${id}/acknowledge`));
+  }
+
+  approveApproval(id: string, project: string, comment?: string): Promise<{ success: boolean }> {
+    return firstValueFrom(this.api.post<{ success: boolean }>(`/devops/approvals/${id}/approve`, { project, comment }));
+  }
+
+  rejectApproval(id: string, project: string, comment?: string): Promise<{ success: boolean }> {
+    return firstValueFrom(this.api.post<{ success: boolean }>(`/devops/approvals/${id}/reject`, { project, comment }));
+  }
+
+  getPoolHistory(poolId: string, windowHours = 6): Promise<{ data: PoolHistoryData }> {
+    return firstValueFrom(this.api.get<{ data: PoolHistoryData }>(`/devops/pools/${poolId}/history`, { windowHours }));
   }
 }

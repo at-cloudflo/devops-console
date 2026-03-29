@@ -1,4 +1,4 @@
-import { Alert, AlertType, AlertSeverity, AlertStatus } from '../models/alert.model';
+import { Alert, AlertDomain, AlertType, AlertSeverity, AlertStatus } from '../models/alert.model';
 import * as cacheService from '../cache/cache.service';
 import { PoolSummary, AgentDetail, QueueJob, PendingApproval } from '../models/devops.model';
 import { VertexJob } from '../models/mlops.model';
@@ -8,9 +8,10 @@ import { sendTeamsAlert } from './teams-webhook.service';
 // In-memory alert store for POC
 const alertStore = new Map<string, Alert>();
 
-export function getAlerts(status?: AlertStatus): Alert[] {
-  const alerts = Array.from(alertStore.values());
-  if (status) return alerts.filter((a) => a.status === status);
+export function getAlerts(status?: AlertStatus, domain?: AlertDomain): Alert[] {
+  let alerts = Array.from(alertStore.values());
+  if (domain) alerts = alerts.filter((a) => a.domain === domain);
+  if (status) alerts = alerts.filter((a) => a.status === status);
   return alerts.sort((a, b) => new Date(b.startedAt).getTime() - new Date(a.startedAt).getTime());
 }
 
@@ -45,6 +46,7 @@ export function runAlertEngine(): void {
     const poolAlertId = `pool-avail-${pool.id}`;
     if (pool.healthPercent < thresholds.poolCriticalPercent) {
       upsertAlert(poolAlertId, {
+        domain: 'devops',
         type: 'pool_availability',
         severity: 'critical',
         source: pool.name,
@@ -54,6 +56,7 @@ export function runAlertEngine(): void {
       });
     } else if (pool.healthPercent < thresholds.poolWarningPercent) {
       upsertAlert(poolAlertId, {
+        domain: 'devops',
         type: 'pool_availability',
         severity: 'warning',
         source: pool.name,
@@ -77,6 +80,7 @@ export function runAlertEngine(): void {
         const alertId = `agent-offline-${agent.id}`;
         const offlineMinutes = Math.floor(offlineMs / 60000);
         upsertAlert(alertId, {
+          domain: 'devops',
           type: 'agent_offline',
           severity: offlineMs > offlineThresholdMs * 3 ? 'critical' : 'warning',
           source: agent.name,
@@ -99,6 +103,7 @@ export function runAlertEngine(): void {
         const alertId = `queue-wait-${job.id}`;
         const waitMinutes = Math.floor(waitMs / 60000);
         upsertAlert(alertId, {
+          domain: 'devops',
           type: 'queue_wait_time',
           severity: waitMinutes > thresholds.queueWaitMinutes * 2 ? 'critical' : 'warning',
           source: job.pipelineName,
@@ -120,6 +125,7 @@ export function runAlertEngine(): void {
         const alertId = `approval-age-${approval.id}`;
         const ageHours = (waitingMs / 3600000).toFixed(1);
         upsertAlert(alertId, {
+          domain: 'devops',
           type: 'approval_age',
           severity: waitingMs > approvalAgeThresholdMs * 2 ? 'critical' : 'warning',
           source: approval.pipelineName,
@@ -137,6 +143,7 @@ export function runAlertEngine(): void {
     if (job.state === 'PIPELINE_STATE_FAILED') {
       const alertId = `vertex-failed-${job.id}`;
       upsertAlert(alertId, {
+        domain: 'mlops',
         type: 'vertex_job_failed',
         severity: 'warning',
         source: job.displayName,
@@ -173,6 +180,7 @@ function fireNotification(alert: Alert, event: 'new' | 'escalated' | 'resolved')
 function upsertAlert(
   id: string,
   data: {
+    domain: AlertDomain;
     type: AlertType;
     severity: AlertSeverity;
     source: string;
@@ -196,6 +204,7 @@ function upsertAlert(
 
   const alert: Alert = {
     id,
+    domain: data.domain,
     type: data.type,
     severity: data.severity,
     source: data.source,

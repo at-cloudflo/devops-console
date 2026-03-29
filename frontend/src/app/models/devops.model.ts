@@ -69,8 +69,24 @@ export interface PendingApproval {
   url?: string;
 }
 
+export interface PoolUtilisationPoint {
+  ts: string;
+  busy: number;
+  idle: number;
+  offline: number;
+  total: number;
+}
+
+export interface PoolHistoryData {
+  poolId: string;
+  poolName: string;
+  windowHours: number;
+  points: PoolUtilisationPoint[];
+}
+
 export interface Alert {
   id: string;
+  domain: 'devops' | 'mlops';
   type: string;
   severity: AlertSeverity;
   source: string;

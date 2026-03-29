@@ -1,6 +1,8 @@
 import { Request, Response } from 'express';
 import * as devopsService from '../services/devops.service';
+import * as poolHistoryService from '../services/pool-history.service';
 import { parsePagination, paginate } from '../utils/paginate';
+import * as cacheService from '../cache/cache.service';
 
 export async function getPools(req: Request, res: Response): Promise<void> {
   try {
@@ -55,7 +57,7 @@ export async function getAgents(req: Request, res: Response): Promise<void> {
 
 export async function getAgentsByPool(req: Request, res: Response): Promise<void> {
   try {
-    const agents = await devopsService.getAgents(req.params['id']);
+    const agents = await devopsService.getAgents(req.params['id'] as string);
     res.json(paginate(agents, parsePagination(req.query)));
   } catch (err) {
     console.error('[devops] getAgentsByPool error:', err);
@@ -109,6 +111,17 @@ export async function getApprovals(req: Request, res: Response): Promise<void> {
   }
 }
 
+export function getPoolHistory(req: Request, res: Response): void {
+  const poolId = req.params['id'] as string;
+  const windowHours = req.query['windowHours'] ? Number(req.query['windowHours']) : 6;
+  const data = poolHistoryService.getHistory(poolId, windowHours);
+  if (!data) {
+    res.status(404).json({ error: 'No history for this pool yet' });
+    return;
+  }
+  res.json({ data });
+}
+
 export async function getAlerts(req: Request, res: Response): Promise<void> {
   try {
     const { getAlerts: fetchAlerts } = await import('../services/alert.service');
@@ -116,7 +129,7 @@ export async function getAlerts(req: Request, res: Response): Promise<void> {
     const severity = req.query['severity'] as string | undefined;
     const search = (req.query['search'] as string | undefined)?.toLowerCase();
 
-    let alerts = fetchAlerts(status);
+    let alerts = fetchAlerts(status, 'devops');
     if (severity) alerts = alerts.filter((a) => a.severity === severity);
     if (search) alerts = alerts.filter((a) =>
       a.message.toLowerCase().includes(search) ||
@@ -131,11 +144,37 @@ export async function getAlerts(req: Request, res: Response): Promise<void> {
   }
 }
 
+export async function approveApproval(req: Request, res: Response): Promise<void> {
+  try {
+    const approvalId = req.params['id'] as string;
+    const { project, comment } = req.body as { project?: string; comment?: string };
+    if (!project) { res.status(400).json({ error: 'project is required' }); return; }
+    await devopsService.submitApproval(project, approvalId, 'approved', comment);
+    res.json({ success: true });
+  } catch (err) {
+    console.error('[devops] approveApproval error:', err);
+    res.status(500).json({ error: err instanceof Error ? err.message : 'Failed to approve' });
+  }
+}
+
+export async function rejectApproval(req: Request, res: Response): Promise<void> {
+  try {
+    const approvalId = req.params['id'] as string;
+    const { project, comment } = req.body as { project?: string; comment?: string };
+    if (!project) { res.status(400).json({ error: 'project is required' }); return; }
+    await devopsService.submitApproval(project, approvalId, 'rejected', comment);
+    res.json({ success: true });
+  } catch (err) {
+    console.error('[devops] rejectApproval error:', err);
+    res.status(500).json({ error: err instanceof Error ? err.message : 'Failed to reject' });
+  }
+}
+
 export async function acknowledgeAlert(req: Request, res: Response): Promise<void> {
   try {
     const userId = req.session?.user?.email ?? 'unknown';
     const { acknowledgeAlert: ack } = await import('../services/alert.service');
-    const alert = ack(req.params['id'], userId);
+    const alert = ack(req.params['id'] as string, userId);
     if (!alert) { res.status(404).json({ error: 'Alert not found' }); return; }
     res.json({ data: alert });
   } catch (err) {

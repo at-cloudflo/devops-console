@@ -1,7 +1,8 @@
-import { Component } from '@angular/core';
+import { Component, OnDestroy, OnInit, inject } from '@angular/core';
 import { RouterOutlet } from '@angular/router';
 import { SidebarComponent } from './sidebar/sidebar.component';
 import { HeaderComponent } from './header/header.component';
+import { SseService } from '../core/sse/sse.service';
 
 @Component({
   selector: 'app-layout',
@@ -19,4 +20,9 @@ import { HeaderComponent } from './header/header.component';
     </div>
   `
 })
-export class LayoutComponent {}
+export class LayoutComponent implements OnInit, OnDestroy {
+  private readonly sse = inject(SseService);
+
+  ngOnInit(): void { this.sse.connect(); }
+  ngOnDestroy(): void { this.sse.disconnect(); }
+}

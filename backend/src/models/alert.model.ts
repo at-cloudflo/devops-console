@@ -1,3 +1,5 @@
+export type AlertDomain = 'devops' | 'mlops';
+
 export type AlertType =
   | 'agent_offline'
   | 'pool_availability'
@@ -11,6 +13,7 @@ export type AlertStatus = 'open' | 'acknowledged' | 'resolved';
 
 export interface Alert {
   id: string;
+  domain: AlertDomain;
   type: AlertType;
   severity: AlertSeverity;
   source: string;       // e.g. pool name, agent name

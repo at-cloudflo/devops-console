@@ -74,6 +74,12 @@ export const routes: Routes = [
               import('./features/mlops/vertex-jobs/vertex-jobs.component').then((m) => m.VertexJobsComponent),
             canActivate: [roleGuard('mlops.read', 'portal.admin')],
           },
+          {
+            path: 'alerts',
+            loadComponent: () =>
+              import('./features/mlops/alerts/mlops-alerts.component').then((m) => m.MlopsAlertsComponent),
+            canActivate: [roleGuard('mlops.read', 'portal.admin')],
+          },
         ],
       },
 
