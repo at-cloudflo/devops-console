@@ -68,6 +68,15 @@ export interface PendingApproval {
   url?: string;
 }
 
+export interface ProjectAdmin {
+  id: string;
+  displayName: string;
+  uniqueName: string;
+  imageUrl?: string;
+  project: string;
+  organization: string;
+}
+
 export interface RefreshMetadata {
   resource: string;
   lastRefresh: string; // ISO date

@@ -14,5 +14,7 @@ router.get('/queue', requireAuth, devopsRead, devopsController.getQueue);
 router.get('/approvals', requireAuth, approvalRead, devopsController.getApprovals);
 router.get('/alerts', requireAuth, devopsRead, devopsController.getAlerts);
 router.post('/alerts/:id/acknowledge', requireAuth, devopsRead, devopsController.acknowledgeAlert);
+router.get('/projects/:projectKey/admins', requireAuth, devopsRead, devopsController.getProjectAdmins);
+router.get('/projects/admins', requireAuth, devopsRead, devopsController.getProjectAdmins);
 
 export default router;

@@ -131,6 +131,17 @@ export async function getAlerts(req: Request, res: Response): Promise<void> {
   }
 }
 
+export async function getProjectAdmins(req: Request, res: Response): Promise<void> {
+  try {
+    const projectKey = req.params['projectKey'] as string | undefined;
+    const admins = await devopsService.getProjectAdmins(projectKey);
+    res.json({ data: admins });
+  } catch (err) {
+    console.error('[devops] getProjectAdmins error:', err);
+    res.status(500).json({ error: 'Failed to load project admins' });
+  }
+}
+
 export async function acknowledgeAlert(req: Request, res: Response): Promise<void> {
   try {
     const userId = req.session?.user?.email ?? 'unknown';

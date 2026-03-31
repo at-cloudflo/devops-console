@@ -1,6 +1,6 @@
 import path from 'path';
 import fs from 'fs';
-import { PoolSummary, AgentDetail, QueueJob, PendingApproval, AgentStatus, JobStatus, AlertState } from '../models/devops.model';
+import { PoolSummary, AgentDetail, QueueJob, PendingApproval, ProjectAdmin, AgentStatus, JobStatus, AlertState } from '../models/devops.model';
 
 /**
  * Azure DevOps Adapter
@@ -287,6 +287,80 @@ async function fetchApprovalsLive(projectKey?: string): Promise<PendingApproval[
   return results.flat();
 }
 
+// ── Mock: project admins ───────────────────────────────────────────────────
+
+async function fetchProjectAdminsMock(projectKey?: string): Promise<ProjectAdmin[]> {
+  await simulateDelay(25);
+  return [];
+}
+
+// ── Live: project admins ───────────────────────────────────────────────────
+
+const ADO_VSSPS_URL = ADO_ORG_URL.replace('//dev.azure.com/', '//vssps.dev.azure.com/');
+
+async function fetchProjectAdminsLive(projectKey?: string): Promise<ProjectAdmin[]> {
+  const projects = projectKey ? [projectKey] : ADO_PROJECTS;
+  if (projects.length === 0) {
+    throw new Error('Set AZURE_DEVOPS_PROJECTS (comma-separated) to use live project admins data');
+  }
+
+  const results = await Promise.all(
+    projects.map(async (project): Promise<ProjectAdmin[]> => {
+      try {
+        // 1. Get project details to obtain its storage key (id)
+        const proj = await adoGet<{ id: string; name: string }>(
+          `${ADO_ORG_URL}/_apis/projects/${project}?api-version=7.1`
+        );
+
+        // 2. Resolve project scope descriptor
+        const descResp = await adoGet<{ value: string }>(
+          `${ADO_VSSPS_URL}/_apis/graph/descriptors/${proj.id}?api-version=7.1-preview.1`
+        );
+
+        // 3. List all security groups in the project scope
+        const groupsResp = await adoGet<{ value: AdoGraphGroup[] }>(
+          `${ADO_VSSPS_URL}/_apis/graph/groups?scopeDescriptor=${descResp.value}&api-version=7.1-preview.1`
+        );
+
+        const adminGroup = groupsResp.value.find((g) => g.displayName === 'Project Administrators');
+        if (!adminGroup) return [];
+
+        // 4. Get direct members of the Project Administrators group
+        const membershipsResp = await adoGet<{ value: Array<{ memberDescriptor: string }> }>(
+          `${ADO_VSSPS_URL}/_apis/graph/memberships/${adminGroup.descriptor}?direction=Down&api-version=7.1-preview.1`
+        );
+
+        // 5. Resolve each member's identity (users only; nested groups are skipped)
+        const admins = await Promise.all(
+          membershipsResp.value.map(async (m): Promise<ProjectAdmin | null> => {
+            try {
+              const user = await adoGet<AdoGraphUser>(
+                `${ADO_VSSPS_URL}/_apis/graph/users/${m.memberDescriptor}?api-version=7.1-preview.1`
+              );
+              return {
+                id: user.descriptor,
+                displayName: user.displayName,
+                uniqueName: user.principalName ?? user.mailAddress ?? user.displayName,
+                imageUrl: user._links?.avatar?.href,
+                project,
+                organization: ADO_ORG_NAME,
+              } satisfies ProjectAdmin;
+            } catch {
+              return null; // skip nested groups or unresolvable descriptors
+            }
+          })
+        );
+
+        return admins.filter((a): a is ProjectAdmin => a !== null);
+      } catch {
+        return [];
+      }
+    })
+  );
+
+  return results.flat();
+}
+
 // ── ADO API response shapes (internal) ────────────────────────────────────
 
 interface AdoPool { id: number; name: string; }
@@ -312,6 +386,18 @@ interface AdoApproval {
   environment?: { name: string };
   steps?: Array<{ actualApprover?: { uniqueName?: string; displayName?: string } }>;
 }
+interface AdoGraphGroup {
+  descriptor: string;
+  displayName: string;
+  principalName: string;
+}
+interface AdoGraphUser {
+  descriptor: string;
+  displayName: string;
+  mailAddress?: string;
+  principalName?: string;
+  _links?: { avatar?: { href: string } };
+}
 
 // ── Public exports ─────────────────────────────────────────────────────────
 
@@ -319,3 +405,4 @@ export const fetchPools = USE_MOCK_DEVOPS ? fetchPoolsMock : fetchPoolsLive;
 export const fetchAgents = USE_MOCK_DEVOPS ? fetchAgentsMock : fetchAgentsLive;
 export const fetchQueueJobs = USE_MOCK_DEVOPS ? fetchQueueJobsMock : fetchQueueJobsLive;
 export const fetchApprovals = USE_MOCK_DEVOPS ? fetchApprovalsMock : fetchApprovalsLive;
+export const fetchProjectAdmins = USE_MOCK_DEVOPS ? fetchProjectAdminsMock : fetchProjectAdminsLive;

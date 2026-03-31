@@ -1,6 +1,6 @@
 import * as azureAdapter from '../adapters/azure-devops.adapter';
 import * as cacheService from '../cache/cache.service';
-import { PoolSummary, AgentDetail, QueueJob, PendingApproval } from '../models/devops.model';
+import { PoolSummary, AgentDetail, QueueJob, PendingApproval, ProjectAdmin } from '../models/devops.model';
 
 const CACHE_TTL_POOLS = 60_000;
 const CACHE_TTL_AGENTS = 60_000;
@@ -45,6 +45,10 @@ export async function getQueueJobs(
   const allJobs = await azureAdapter.fetchQueueJobs();
   cacheService.setCache('queue', allJobs);
   return jobs;
+}
+
+export async function getProjectAdmins(project?: string): Promise<ProjectAdmin[]> {
+  return azureAdapter.fetchProjectAdmins(project);
 }
 
 export async function getApprovals(project?: string, forceRefresh = false): Promise<PendingApproval[]> {

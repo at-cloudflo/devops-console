@@ -1,7 +1,7 @@
 import { Injectable, inject } from '@angular/core';
 import { firstValueFrom } from 'rxjs';
 import { ApiClientService } from '../../core/http/api-client.service';
-import { PoolSummary, AgentDetail, QueueJob, PendingApproval, Alert } from '../../models/devops.model';
+import { PoolSummary, AgentDetail, QueueJob, PendingApproval, Alert, ProjectAdmin } from '../../models/devops.model';
 import { ApiResponse, PaginatedResponse } from '../../models/common.model';
 
 @Injectable({ providedIn: 'root' })
@@ -38,5 +38,13 @@ export class DevopsApiService {
 
   acknowledgeAlert(id: string): Promise<ApiResponse<Alert>> {
     return firstValueFrom(this.api.post<ApiResponse<Alert>>(`/devops/alerts/${id}/acknowledge`));
+  }
+
+  getProjectAdmins(projectKey: string): Promise<ApiResponse<ProjectAdmin[]>> {
+    return firstValueFrom(this.api.get<ApiResponse<ProjectAdmin[]>>(`/devops/projects/${projectKey}/admins`));
+  }
+
+  getAllProjectAdmins(): Promise<ApiResponse<ProjectAdmin[]>> {
+    return firstValueFrom(this.api.get<ApiResponse<ProjectAdmin[]>>('/devops/projects/admins'));
   }
 }
